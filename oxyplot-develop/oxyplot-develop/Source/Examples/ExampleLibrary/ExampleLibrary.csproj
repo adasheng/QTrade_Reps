@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net462;net6.0;net8.0</TargetFrameworks>
+    <PackageId>OxyPlot.ExampleLibrary</PackageId>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Description>Example models for OxyPlot.</Description>
+    <PackageTags>plotting plot charting chart</PackageTags>
+    <LangVersion>11</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="Resources\DodgyContourData.tsv" />
+    <None Remove="Resources\X.txt" />
+    <None Remove="Resources\Y.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Bergensbanen.csv" />
+    <EmbeddedResource Include="Resources\DodgyContourData.tsv" />
+    <EmbeddedResource Include="Resources\OxyPlot.png" />
+    <EmbeddedResource Include="Resources\west0479.mtx" />
+    <EmbeddedResource Include="Resources\WorldPopulation.xml" />
+    <EmbeddedResource Include="Resources\X.txt" />
+    <EmbeddedResource Include="Resources\Y.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Net.Requests" Version="4.3.0" />
+    <PackageReference Include="System.Xml.XmlSerializer" Version="4.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\OxyPlot\OxyPlot.csproj" />
+  </ItemGroup>
+</Project>

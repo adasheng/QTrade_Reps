@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFrameworks>net462;net6.0-windows;net8.0-windows</TargetFrameworks>
+        <UseWPF>true</UseWPF>
+        <Description>OxyPlot WPF unit tests</Description>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Examples\ExampleLibrary\ExampleLibrary.csproj" />
+        <ProjectReference Include="..\OxyPlot\OxyPlot.csproj" />
+        <ProjectReference Include="..\OxyPlot.Wpf\OxyPlot.Wpf.csproj" />
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.6.0" />
+        <PackageReference Include="NSubstitute" Version="4.2.1" />
+        <PackageReference Include="NUnit" Version="3.14.0" />
+        <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    </ItemGroup>
+</Project>

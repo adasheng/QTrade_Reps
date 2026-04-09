@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\common_target_net.props" />
+  <ItemGroup>
+    <ProjectReference Include="..\Algo\Algo.csproj" />
+    <ProjectReference Include="..\MatchingEngine\MatchingEngine.csproj" />
+  </ItemGroup>
+</Project>

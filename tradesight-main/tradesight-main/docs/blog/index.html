@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeSight Blog — Python Trading Systems</title>
+  <meta name="description" content="Open-source Python algorithmic trading posts: RSI scanners, paper trading, circuit breakers, and more.">
+  <link rel="alternate" type="application/atom+xml" title="TradeSight Blog" href="../feed.xml">
+  <style>
+    body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; }
+    .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+    nav { background: #161b22; border-bottom: 1px solid #21262d; padding: 12px 0; }
+    nav .nav-inner { max-width: 800px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; gap: 24px; }
+    nav a { color: #58a6ff; text-decoration: none; font-size: 0.9rem; }
+    nav .brand { font-weight: 700; font-size: 1.1rem; color: #e6edf3; }
+    h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+    .subtitle { color: #8b949e; margin-bottom: 40px; }
+    .post-card { background: #161b22; border: 1px solid #21262d; border-radius: 12px; padding: 24px; margin-bottom: 20px; transition: border-color 0.2s; }
+    .post-card:hover { border-color: #58a6ff; }
+    .post-card h2 { font-size: 1.3rem; margin: 0 0 8px; }
+    .post-card h2 a { color: #e6edf3; text-decoration: none; }
+    .post-card h2 a:hover { color: #58a6ff; }
+    .post-meta { color: #8b949e; font-size: 0.85rem; margin-bottom: 12px; }
+    .post-excerpt { color: #c9d1d9; line-height: 1.7; }
+    .tag { background: #1c2128; border: 1px solid #30363d; color: #58a6ff; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; margin-right: 8px; }
+    .feed-link { display: inline-flex; align-items: center; gap: 8px; background: #161b22; border: 1px solid #30363d; color: #8b949e; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 0.85rem; margin-bottom: 32px; }
+    .feed-link:hover { border-color: #58a6ff; color: #58a6ff; }
+  </style>
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <span class="brand">🔍 TradeSight</span>
+    <a href="../index.html">Home</a>
+    <a href="index.html">Blog</a>
+    <a href="https://github.com/rmbell09-lang/tradesight">GitHub</a>
+  </div>
+</nav>
+<div class="container">
+  <h1>TradeSight Blog</h1>
+  <p class="subtitle">Open-source Python trading systems: signals, strategies, and real paper trading results.</p>
+  <div class="post-card">
+    <h2><a href="algo-trading-april-2025-tariff-crash.html">Python Algo Trading During the April 2025 Tariff Crash &mdash; Which Strategies Survived</a></h2>
+    <div class="post-meta">&#128197; April 6, 2026 &middot; &#9200; 8 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">backtesting</span>
+      <span class="tag">crash-analysis</span>
+      <span class="tag">algo-trading</span>
+      <span class="tag">python</span>
+    </div>
+    <p class="post-excerpt">VIX hit 52. SPY dropped 12% in two days. We backtested all 9 TradeSight strategies on the April 2025 tariff crash &mdash; which ones survived, which got destroyed, and why mean reversion is the first casualty in macro crashes.</p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="quantconnect-alternative-python.html">TradeSight vs QuantConnect: Head-to-Head Comparison (2026)</a></h2>
+    <div class="post-meta">&#128197; April 6, 2026 &middot; &#9200; 9 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">comparison</span>
+      <span class="tag">quantconnect</span>
+      <span class="tag">python</span>
+      <span class="tag">algo-trading</span>
+    </div>
+    <p class="post-excerpt">
+      QuantConnect vs TradeSight: honest head-to-head on pricing, setup, backtesting depth, paper trading, and strategy workflow. When the $240/yr subscription is worth it &mdash; and when free + local wins.
+    </p>
+  </div>
+
+
+
+  <div class="post-card">
+    <h2><a href="backtrader-alternative-python-2026.html">Backtrader Alternative in 2026? TradeSight vs Backtrader vs Zipline vs QuantConnect</a></h2>
+    <div class="post-meta">ð April 5, 2026 &middot; &#9200; 8 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">backtrader-alternative</span>
+      <span class="tag">comparison</span>
+      <span class="tag">open-source</span>
+    </div>
+    <p class="post-excerpt">
+      Backtrader abandoned. Zipline dead. QuantConnect expensive. An honest comparison of Python algo trading options in 2026 &mdash; and where free local paper trading with live Alpaca integration fits in.
+    </p>
+  </div>
+
+
+  <div class="post-card">
+    <h2><a href="tradesight-architecture-deep-dive.html">Building a Python Algo Trading Strategy Lab: How TradeSight Works Under the Hood</a></h2>
+    <div class="post-meta">📅 April 5, 2026 &middot; &#9200; 7 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">algo-trading</span>
+      <span class="tag">architecture</span>
+      <span class="tag">open-source</span>
+      <span class="tag">backtesting</span>
+    </div>
+    <p class="post-excerpt">
+      A technical walkthrough of how TradeSight is structured: paper_trader.py, the strategies directory,
+      the overnight tournament system that backtests 9 strategies nightly, and live paper trading via
+      Alpaca free API. Architecture, code snippets, and the composite scoring formula.
+    </p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="gap-detection-paper-trader.html">How We Handle Gap Openings in Our Python Paper Trader</a></h2>
+    <div class="post-meta">📅 April 5, 2026 · ⏱ 6 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">paper-trading</span>
+      <span class="tag">gap-detection</span>
+      <span class="tag">risk-management</span>
+    </div>
+    <p class="post-excerpt">
+      April 3rd was a gap day — MSFT +4.6%, AAPL +4.5%, V +4.8%. Here's how TradeSight's gap detector
+      fired that morning, the reasoning behind "alert vs. auto-exit", and how VIX regime detection
+      changes the stop-loss parameters in real time. Real logs, real code, real portfolio data (+8.84%).
+    </p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="strategy-tournament.html">How TradeSight's Overnight Strategy Tournament Works</a></h2>
+    <div class="post-meta">📅 April 4, 2026 · ⏱ 7 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">algo-trading</span>
+      <span class="tag">backtesting</span>
+      <span class="tag">open-source</span>
+    </div>
+    <p class="post-excerpt">
+      Inside TradeSight's overnight AI tournament: how 9 strategies compete nightly, how composite
+      scores (Sharpe, drawdown, win rate, profit factor) decide the winner, and why the top strategy
+      changes week to week based on market regime.
+    </p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="tradesight-launch-week1.html">TradeSight Launch Week: What We Built, What Broke, and What Actually Worked</a></h2>
+    <div class="post-meta">📅 April 3, 2026 · ⏱ 8 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">launch</span>
+      <span class="tag">open-source</span>
+      <span class="tag">python</span>
+      <span class="tag">algo-trading</span>
+    </div>
+    <p class="post-excerpt">
+      A real account of shipping TradeSight — 169 tests, 9 strategies, AI overnight tournaments.
+      The pandas EWM gotcha that cost two days, the cron timing bug that corrupted results, and
+      why MACD with an SMA filter beat every other approach we tried.
+    </p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="python-backtesting-libraries-2026.html">Python Backtesting Libraries in 2026: Backtrader vs Zipline vs VectorBT vs TradeSight</a></h2>
+    <div class="post-meta">ð April 3, 2026 Â· â± 9 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">backtesting</span>
+      <span class="tag">comparison</span>
+      <span class="tag">algo-trading</span>
+    </div>
+    <p class="post-excerpt">
+      An honest comparison of Backtrader, Zipline, VectorBT, and TradeSight in 2026.
+      Each has real tradeoffs worth knowing before you commit to one.
+    </p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="macd-momentum-strategy.html">MACD Momentum Strategy in Python: Implementation and Live Paper Trading Results</a></h2>
+    <div class="post-meta">📅 April 3, 2026 · ⏱ 7 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">MACD</span>
+      <span class="tag">momentum</span>
+    </div>
+    <p class="post-excerpt">
+      Deep dive into MACD crossover strategy in Python — the adjust=False gotcha in pandas EWM, histogram divergence signals, SMA trend filter that cut false signals by 40%, and paper trading results: 82% win rate with filter vs 63% without.
+    </p>
+  </div>
+
+  <a href="../feed.xml" class="feed-link">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.18 15.64a2.18 2.18 0 0 1 2.18 2.18C8.36 19.01 7.38 20 6.18 20C4.98 20 4 19.01 4 17.82a2.18 2.18 0 0 1 2.18-2.18M4 4.44A15.56 15.56 0 0 1 19.56 20h-2.83A12.73 12.73 0 0 0 4 7.27V4.44m0 5.66a9.9 9.9 0 0 1 9.9 9.9h-2.83A7.07 7.07 0 0 0 4 12.93V10.1z"/></svg>
+    Atom/RSS Feed
+  </a>
+
+
+  <div class="post-card">
+    <h2><a href="trading-strategy-performance-metrics.html">How to Measure Trading Strategy Performance in Python</a></h2>
+    <div class="post-meta">📅 April 3, 2026 · ⏱ 9 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">backtesting</span>
+      <span class="tag">performance</span>
+      <span class="tag">open-source</span>
+    </div>
+    <p class="post-excerpt">
+      Sharpe ratio, max drawdown, win rate, profit factor, and Calmar ratio — the five metrics that tell
+      you if a trading strategy is worth running live. Includes Python implementations with real TradeSight
+      tournament results.
+    </p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="paper-trading-bot.html">Building a Paper Trading Bot with Python + Alpaca API</a></h2>
+    <div class="post-meta">📅 April 2, 2026 · ⏱ 6 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">alpaca-api</span>
+      <span class="tag">paper-trading</span>
+      <span class="tag">algorithmic-trading</span>
+    </div>
+    <p class="post-excerpt">
+      How TradeSight runs 4 concurrent strategies (MACD, RSI, VWAP, Bollinger) against Alpaca's paper API.
+      Real live results: +6.43% portfolio return, with MACD crushing RSI in a high-VIX regime. Includes full code.
+    </p>
+  </div>
+
+  <div class="post-card">
+    <h2><a href="python-rsi-stock-scanner.html">Building a Python Stock Scanner with RSI Signals</a></h2>
+    <div class="post-meta">📅 April 2, 2026 · ⏱ 8 min read</div>
+    <div style="margin-bottom: 12px;">
+      <span class="tag">python</span>
+      <span class="tag">trading</span>
+      <span class="tag">open-source</span>
+    </div>
+    <p class="post-excerpt">
+      How I built a stock scanner using RSI, MACD, and relative volume signals in Python — with yfinance,
+      pandas, and a circuit breaker that eliminated drawdown spirals. Includes live paper trading results (+6.43% over 3 weeks).
+    </p>
+  </div>
+</div>
+</body>
+</html>

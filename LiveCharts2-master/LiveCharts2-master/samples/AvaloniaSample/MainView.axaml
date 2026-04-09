@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="using:AvaloniaSample"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="AvaloniaSample.MainView"
+             x:DataType="local:MainWindowViewModel">
+
+    <UserControl.Resources>
+        <local:SampleConverter x:Key="SampleConverter"/>
+    </UserControl.Resources>
+
+    <Grid RowDefinitions="Auto,*">
+        <Grid ColumnDefinitions="Auto,*" Margin="8,4">
+            <Label
+                Content="Select sample:"
+                VerticalAlignment="Center"/>
+            <ComboBox
+                Grid.Column="1"
+                SelectedItem="{Binding SelectedSample}"
+                ItemsSource="{Binding Samples}"
+                VerticalAlignment="Center"/>
+        </Grid>
+        <Border
+            Grid.Row="1"
+            Margin="10">
+            <ContentControl
+                Content="{Binding SelectedSample, Converter={StaticResource SampleConverter}}"/>
+        </Border>
+    </Grid>
+</UserControl>

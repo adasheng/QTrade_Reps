@@ -1,0 +1,64 @@
+﻿namespace StockSharp.Algo.Indicators;
+
+/// <summary>
+/// Guppy Multiple Moving Average (GMMA).
+/// </summary>
+[Display(
+	ResourceType = typeof(LocalizedStrings),
+	Name = LocalizedStrings.GMMAKey,
+	Description = LocalizedStrings.GuppyMultipleMovingAverageKey)]
+[Doc("topics/api/indicators/list_of_indicators/guppy_multiple_moving_average.html")]
+[IndicatorOut(typeof(IGuppyMultipleMovingAverageValue))]
+public class GuppyMultipleMovingAverage : BaseComplexIndicator<IGuppyMultipleMovingAverageValue>
+{
+	private static readonly int[] _lengths = new[] { 3, 5, 8, 10, 12, 15 }.Concat([30, 35, 40, 45, 50, 60]);
+
+	/// <summary>
+	/// Initializes a new instance of the <see cref="GuppyMultipleMovingAverage"/>.
+	/// </summary>
+	public GuppyMultipleMovingAverage()
+	{
+		foreach (var length in _lengths)
+			AddInner(new ExponentialMovingAverage { Length = length });
+	}
+
+	/// <inheritdoc />
+	protected override IGuppyMultipleMovingAverageValue CreateValue(DateTime time)
+		=> new GuppyMultipleMovingAverageValue(this, time);
+}
+
+/// <summary>
+/// <see cref="GuppyMultipleMovingAverage"/> indicator value.
+/// </summary>
+public interface IGuppyMultipleMovingAverageValue : IComplexIndicatorValue
+{
+	/// <summary>
+	/// Gets values of all moving averages.
+	/// </summary>
+	IIndicatorValue[] AveragesValues { get; }
+	
+	/// <summary>
+	/// Gets values of all moving averages.
+	/// </summary>
+	[Browsable(false)]
+	decimal?[] Averages { get; }
+}
+
+/// <summary>
+/// GuppyMultipleMovingAverage indicator value implementation.
+/// </summary>
+/// <remarks>
+/// Initializes a new instance of the <see cref="GuppyMultipleMovingAverageValue"/> class.
+/// </remarks>
+/// <param name="indicator">The parent GuppyMultipleMovingAverage indicator.</param>
+/// <param name="time">Time associated with this indicator value.</param>
+public class GuppyMultipleMovingAverageValue(GuppyMultipleMovingAverage indicator, DateTime time) : ComplexIndicatorValue<GuppyMultipleMovingAverage>(indicator, time), IGuppyMultipleMovingAverageValue
+{
+	/// <inheritdoc />
+	public IIndicatorValue[] AveragesValues => [.. TypedIndicator.InnerIndicators.Select(ind => this[ind])];
+	/// <inheritdoc />
+	public decimal?[] Averages => [.. AveragesValues.Select(v => v.ToNullableDecimal(TypedIndicator.Source))];
+
+	/// <inheritdoc />
+	public override string ToString() => $"Averages=[{Averages.Select(x => $"{x}").JoinCommaSpace()}]";
+}

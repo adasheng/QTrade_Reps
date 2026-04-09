@@ -1,0 +1,135 @@
+﻿namespace StockSharp.Algo.Indicators;
+
+/// <summary>
+/// Welles Wilder Average Directional Index.
+/// </summary>
+/// <remarks>
+/// https://doc.stocksharp.com/topics/api/indicators/list_of_indicators/adx.html
+/// </remarks>
+[Display(
+	ResourceType = typeof(LocalizedStrings),
+	Name = LocalizedStrings.AdxKey,
+	Description = LocalizedStrings.AverageDirectionalIndexKey)]
+[Doc("topics/api/indicators/list_of_indicators/adx.html")]
+[IndicatorOut(typeof(IAverageDirectionalIndexValue))]
+public class AverageDirectionalIndex : BaseComplexIndicator<IAverageDirectionalIndexValue>
+{
+	/// <summary>
+	/// Initializes a new instance of the <see cref="AverageDirectionalIndex"/>.
+	/// </summary>
+	public AverageDirectionalIndex()
+		: this(new DirectionalIndex { Length = 14 }, new WilderMovingAverage { Length = 14 })
+	{
+	}
+
+	/// <summary>
+	/// Initializes a new instance of the <see cref="AverageDirectionalIndex"/>.
+	/// </summary>
+	/// <param name="dx">Welles Wilder Directional Movement Index.</param>
+	/// <param name="movingAverage">Moving Average.</param>
+	public AverageDirectionalIndex(DirectionalIndex dx, DecimalLengthIndicator movingAverage)
+		: base(dx, movingAverage)
+	{
+		Dx = dx;
+		MovingAverage = movingAverage;
+		Mode = ComplexIndicatorModes.Sequence;
+	}
+
+	/// <inheritdoc />
+	public override IndicatorMeasures Measure => IndicatorMeasures.Percent;
+
+	/// <summary>
+	/// Welles Wilder Directional Movement Index.
+	/// </summary>
+	[Browsable(false)]
+	public DirectionalIndex Dx { get; }
+
+	/// <summary>
+	/// Moving Average.
+	/// </summary>
+	[Browsable(false)]
+	public DecimalLengthIndicator MovingAverage { get; }
+
+	/// <summary>
+	/// Period length.
+	/// </summary>
+	[Display(
+		ResourceType = typeof(LocalizedStrings),
+		Name = LocalizedStrings.PeriodKey,
+		Description = LocalizedStrings.IndicatorPeriodKey,
+		GroupName = LocalizedStrings.GeneralKey)]
+	public int Length
+	{
+		get => MovingAverage.Length;
+		set
+		{
+			MovingAverage.Length = Dx.Length = value;
+			Reset();
+		}
+	}
+
+	/// <inheritdoc />
+	public override void Load(SettingsStorage storage)
+	{
+		base.Load(storage);
+		Length = storage.GetValue<int>(nameof(Length));
+	}
+
+	/// <inheritdoc />
+	public override void Save(SettingsStorage storage)
+	{
+		base.Save(storage);
+		storage.SetValue(nameof(Length), Length);
+	}
+
+	/// <inheritdoc />
+	public override string ToString() => base.ToString() + " " + Length;
+
+	/// <inheritdoc />
+	protected override IAverageDirectionalIndexValue CreateValue(DateTime time)
+		=> new AverageDirectionalIndexValue(this, time);
+}
+
+/// <summary>
+/// <see cref="AverageDirectionalIndex"/> indicator value.
+/// </summary>
+public interface IAverageDirectionalIndexValue : IComplexIndicatorValue
+{
+	/// <summary>
+	/// Gets the <see cref="AverageDirectionalIndex.Dx"/> value.
+	/// </summary>
+	IDirectionalIndexValue Dx { get; }
+	
+	/// <summary>
+	/// Gets the <see cref="AverageDirectionalIndex.MovingAverage"/> value.
+	/// </summary>
+	IIndicatorValue MovingAverageValue { get; }
+
+	/// <summary>
+	/// Gets the <see cref="AverageDirectionalIndex.MovingAverage"/> value.
+	/// </summary>
+	[Browsable(false)]
+	decimal? MovingAverage { get; }
+}
+
+/// <summary>
+/// AverageDirectionalIndex indicator value implementation.
+/// </summary>
+/// <remarks>
+/// Initializes a new instance of the <see cref="AverageDirectionalIndexValue"/> class.
+/// </remarks>
+/// <param name="indicator">The parent AverageDirectionalIndex indicator.</param>
+/// <param name="time">Time associated with this indicator value.</param>
+public class AverageDirectionalIndexValue(AverageDirectionalIndex indicator, DateTime time) : ComplexIndicatorValue<AverageDirectionalIndex>(indicator, time), IAverageDirectionalIndexValue
+{
+	/// <inheritdoc />
+	public IDirectionalIndexValue Dx => (IDirectionalIndexValue)this[TypedIndicator.Dx];
+
+	/// <inheritdoc />
+	public IIndicatorValue MovingAverageValue => this[TypedIndicator.MovingAverage];
+	/// <inheritdoc />
+	public decimal? MovingAverage => MovingAverageValue.ToNullableDecimal(TypedIndicator.Source);
+
+	/// <inheritdoc />
+	public override string ToString() => $"Dx={Dx}, MovingAverage={MovingAverage}";
+}

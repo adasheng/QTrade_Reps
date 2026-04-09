@@ -1,0 +1,19 @@
+name: Autoformat Check
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  sp4-autoformat:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0"
+      - name: Code Format Check
+        run: dotnet format "src/ScottPlot5/ScottPlot5/ScottPlot.csproj" --verify-no-changes

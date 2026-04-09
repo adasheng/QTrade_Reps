@@ -1,0 +1,46 @@
+name: Full Build
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  full:
+    name: Full Build
+    runs-on: windows-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          build-mode: manual
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "microsoft"
+          java-version: "17"
+      - name: Restore Workloads
+        working-directory: ./src/ScottPlot5/
+        run: dotnet workload restore
+      - name: Restore Solution
+        working-directory: ./src/ScottPlot5/
+        run: dotnet restore
+      - name: Build Solution
+        working-directory: ./src/ScottPlot5/
+        run: dotnet build  --configuration Release
+      - name: Run Tests
+        working-directory: ./src/ScottPlot5/
+        run: dotnet test --configuration Release --no-build --verbosity minimal
+      - name: Security Scan
+        uses: github/codeql-action/analyze@v3

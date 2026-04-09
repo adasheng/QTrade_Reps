@@ -1,0 +1,169 @@
+﻿namespace StockSharp.Configuration;
+
+using Ecng.Reflection;
+
+/// <summary>
+/// Extension class.
+/// </summary>
+public static class Extensions
+{
+	/// <summary>
+	/// </summary>
+	public static long? TryGetProductId()
+		=> Paths
+			.EntryAssembly?
+			.GetAttribute<ProductIdAttribute>()?
+			.ProductId;
+
+	private static readonly HashSet<string> _nonAdapters = new(StringComparer.InvariantCultureIgnoreCase)
+	{
+		"StockSharp.Alerts",
+		"StockSharp.Alerts.Interfaces",
+		"StockSharp.Algo",
+		"StockSharp.Algo.Testing",
+		"StockSharp.Algo.Gpu",
+		"StockSharp.Algo.Strategies",
+		"StockSharp.Algo.Indicators",
+		"StockSharp.Algo.Compilation",
+		"StockSharp.Algo.Analytics",
+		"StockSharp.Algo.Import",
+		"StockSharp.Algo.Export",
+		"StockSharp.Reporting",
+		"StockSharp.BusinessEntities",
+		"StockSharp.Charting.Interfaces",
+		"StockSharp.Configuration",
+		"StockSharp.Diagram.Core",
+		"StockSharp.Fix.Core",
+		"StockSharp.Licensing",
+		"StockSharp.Localization",
+		"StockSharp.Media",
+		"StockSharp.Media.Names",
+		"StockSharp.Messages",
+		"StockSharp.Xaml",
+		"StockSharp.Xaml.CodeEditor",
+		"StockSharp.Xaml.Charting",
+		"StockSharp.Xaml.Diagram",
+		"StockSharp.Studio.Controls",
+		"StockSharp.Studio.Core",
+		"StockSharp.Studio.Nuget",
+		"StockSharp.Studio.WebApi",
+		"StockSharp.Studio.WebApi.UI",
+		"StockSharp.QuikLua",
+		"StockSharp.QuikLua32",
+		"StockSharp.MT4",
+		"StockSharp.MT5",
+		"StockSharp.Server.Database",
+		"StockSharp.Server.Core",
+		"StockSharp.Server.Fix",
+		"StockSharp.Server.Utils",
+		"StockSharp.Tests",
+	};
+
+
+	/// <summary>
+	/// Checks if the type has a public constructor accepting <see cref="IdGenerator"/>.
+	/// </summary>
+	/// <param name="type">Type to check.</param>
+	/// <returns><see langword="true"/> if the type has a valid adapter constructor.</returns>
+	public static bool HasValidAdapterConstructor(this Type type)
+	{
+		if (type is null)
+			throw new ArgumentNullException(nameof(type));
+
+		return type.GetConstructor(
+			BindingFlags.Public | BindingFlags.Instance,
+			null,
+			[typeof(IdGenerator)],
+			null) != null;
+	}
+
+	/// <summary>
+	/// Finds and returns adapter types in the specified directory.
+	/// Scans for assemblies starting with "StockSharp." (except a known exclusion list),
+	/// loads them, and collects types implementing <see cref="IMessageAdapter"/> (excluding dialects)
+	/// that have a public constructor accepting <see cref="IdGenerator"/>.
+	/// </summary>
+	/// <param name="dir">The directory path to scan for adapter assemblies (.dll files).</param>
+	/// <param name="errorHandler">An action to handle exceptions that occur during assembly loading.</param>
+	/// <returns>An enumeration of adapter <see cref="Type"/>s found in the directory.</returns>
+	public static IEnumerable<Type> FindAdapters(this string dir, Action<Exception> errorHandler)
+	{
+		var adapters = new List<Type>();
+
+		try
+		{
+			var assemblies = Directory.GetFiles(dir, "*.dll").Where(p =>
+			{
+				var name = Path.GetFileNameWithoutExtension(p);
+
+				if (!name.StartsWithIgnoreCase("StockSharp."))
+					return false;
+
+				if (_nonAdapters.Contains(name))
+					return false;
+
+				return true;
+			});
+
+			foreach (var assembly in assemblies)
+			{
+				if (!assembly.IsAssembly())
+					continue;
+
+				try
+				{
+					var asm = Assembly.Load(AssemblyName.GetAssemblyName(assembly));
+					adapters.AddRange(asm.GetAdapters());
+				}
+				catch (Exception e)
+				{
+					errorHandler?.Invoke(e);
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			errorHandler?.Invoke(e);
+		}
+
+		return adapters;
+	}
+
+	/// <summary>
+	/// Gets adapter types from the specified assembly.
+	/// Filters types implementing <see cref="IMessageAdapter"/> (excluding dialects)
+	/// that have a public constructor accepting <see cref="IdGenerator"/>.
+	/// </summary>
+	/// <param name="assembly">Assembly to scan.</param>
+	/// <returns>An enumeration of adapter <see cref="Type"/>s found in the assembly.</returns>
+	public static IEnumerable<Type> GetAdapters(this Assembly assembly)
+	{
+		if (assembly is null)
+			throw new ArgumentNullException(nameof(assembly));
+
+		return assembly.FindImplementations<IMessageAdapter>(extraFilter: t =>
+			!t.Name.EndsWith("Dialect") && t.HasValidAdapterConstructor());
+	}
+
+	/// <summary>
+	/// Try to get registered Telegram channels.
+	/// </summary>
+	/// <returns>Collection of channels or <see langword="null"/> if service is not registered.</returns>
+	public static IEnumerable<ITelegramChannel> TryGetChannels()
+		=> ConfigManager.TryGetService<IEnumerable<ITelegramChannel>>();
+
+	/// <summary>
+	/// Register collection of Telegram channels for subsequent access through configuration container.
+	/// </summary>
+	/// <param name="channels">Collection of channels to register.</param>
+	public static void RegisterChannels(this IEnumerable<ITelegramChannel> channels)
+		=> ConfigManager.RegisterService(channels);
+
+	/// <summary>
+	/// Try to find the channel by the specified identifier.
+	/// </summary>
+	/// <param name="channelId">Channel id.</param>
+	/// <returns>Found channel or <see langword="null"/> if channel not found.</returns>
+	public static ITelegramChannel TryFindChannel(this long channelId)
+		=> TryGetChannels()?.FirstOrDefault(c => c.Id == channelId);
+}

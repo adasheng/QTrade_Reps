@@ -1,0 +1,58 @@
+name: "Comment"
+description: "Creates or updates a comment on the PR with the progress of the tests"
+inputs:
+  comment_id:
+    description: 'The ID of the comment to append to'
+    required: false
+  content:
+    description: 'The content to add to the comment'
+    required: true
+outputs: 
+  comment_id: 
+    description: "ID of the comment" 
+    value: ${{ steps.update-comment.outputs.comment_id }}
+runs:
+  using: "composite"
+  steps:
+    - id: update-comment
+      uses: actions/github-script@v8
+      with:
+        script: |
+          const commentId = "${{ inputs.comment_id }}";
+          let content = `${{ inputs.content }}`;
+
+          if (!commentId) {
+            const newComment = await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: content
+            });
+
+            core.setOutput("comment_id", newComment.data.id);
+
+            return;
+          }
+
+          const comment = await github.rest.issues.getComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            comment_id: commentId
+          });
+
+          content = content
+            .replace(new RegExp('#success', 'g'), '✅')
+            .replace(new RegExp('#failure', 'g'), '❌')
+            .replace(new RegExp('#cancelled', 'g'), '⚠️');
+          
+          let body = comment.data.body;
+
+          body += `\n${content}`;
+
+          await github.rest.issues.updateComment({
+            comment_id: commentId,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body 
+          });

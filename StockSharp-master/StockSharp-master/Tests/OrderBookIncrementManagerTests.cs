@@ -1,0 +1,580 @@
+namespace StockSharp.Tests;
+
+[TestClass]
+public class OrderBookIncrementManagerTests : BaseTestClass
+{
+	private sealed class TestReceiver : TestLogReceiver
+	{
+	}
+
+	private static QuoteChangeMessage CreateIncrement(SecurityId securityId, DateTime serverTime, QuoteChangeStates state, long[] subscriptionIds, QuoteChange[] bids = null, QuoteChange[] asks = null)
+	{
+		var msg = new QuoteChangeMessage
+		{
+			SecurityId = securityId,
+			ServerTime = serverTime,
+			LocalTime = serverTime,
+			State = state,
+			Bids = bids ?? [],
+			Asks = asks ?? [],
+		};
+
+		msg.SetSubscriptionIds(subscriptionIds);
+
+		return msg;
+	}
+
+	[TestMethod]
+	public void Reset_ClearsState()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe first
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 100,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		// Now reset
+		var (toInner, toOut) = manager.ProcessInMessage(new ResetMessage());
+
+		toInner.Length.AssertEqual(1);
+		toInner[0].Type.AssertEqual(MessageTypes.Reset);
+		toOut.Length.AssertEqual(0);
+
+		// After reset, no subscriptions should exist - send a quote change to verify
+		var quoteMsg = CreateIncrement(secId, DateTime.UtcNow, QuoteChangeStates.SnapshotComplete, [100],
+			bids: [new QuoteChange(100m, 10m)],
+			asks: [new QuoteChange(101m, 20m)]);
+
+		var (forward, extraOut) = manager.ProcessOutMessage(quoteMsg);
+
+		// Should pass through since no subscriptions after reset
+		forward.AssertSame(quoteMsg);
+		extraOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void Subscribe_MarketDepth_AddsSubscription()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 100,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		var (toInner, toOut) = manager.ProcessInMessage(subscribeMsg);
+
+		toInner.Length.AssertEqual(1);
+		toInner[0].AssertSame(subscribeMsg);
+		toOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void Subscribe_AllSecurity_AddsAllSecSubscription()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 100,
+			SecurityId = default, // all securities
+			DataType2 = DataType.MarketDepth,
+		};
+
+		var (toInner, toOut) = manager.ProcessInMessage(subscribeMsg);
+
+		toInner.Length.AssertEqual(1);
+		toInner[0].AssertSame(subscribeMsg);
+		toOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void Subscribe_DoNotBuild_AddsPassThrough()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 100,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+			DoNotBuildOrderBookIncrement = true,
+		};
+
+		var (toInner, toOut) = manager.ProcessInMessage(subscribeMsg);
+
+		toInner.Length.AssertEqual(1);
+		toInner[0].AssertSame(subscribeMsg);
+		toOut.Length.AssertEqual(0);
+
+		// Send increment - should pass through
+		var quoteMsg = CreateIncrement(secId, DateTime.UtcNow, QuoteChangeStates.Increment, [100],
+			bids: [new QuoteChange(100m, 10m)],
+			asks: []);
+
+		var (forward, extraOut) = manager.ProcessOutMessage(quoteMsg);
+
+		forward.AssertSame(quoteMsg);
+		forward.To<QuoteChangeMessage>().State.AssertEqual(QuoteChangeStates.Increment);
+		extraOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void QuoteChange_Increment_BuildsFullBook()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		var time = DateTime.UtcNow;
+
+		// Send snapshot complete
+		var snapshotMsg = CreateIncrement(secId, time, QuoteChangeStates.SnapshotComplete, [1],
+			bids: [new QuoteChange(100m, 10m), new QuoteChange(99m, 5m)],
+			asks: [new QuoteChange(101m, 20m)]);
+
+		var (forward, extraOut) = manager.ProcessOutMessage(snapshotMsg);
+
+		// Original should be suppressed
+		forward.AssertNull();
+
+		// Built book should be in extraOut
+		extraOut.Length.AssertEqual(1);
+
+		var built = (QuoteChangeMessage)extraOut[0];
+		built.State.AssertNull();
+		built.GetSubscriptionIds().SequenceEqual([1L]).AssertTrue();
+		built.Bids.Length.AssertEqual(2);
+		built.Asks.Length.AssertEqual(1);
+	}
+
+	[TestMethod]
+	public void QuoteChange_ApplyIncrement_UpdatesBook()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		var time = DateTime.UtcNow;
+
+		// Send snapshot complete
+		var snapshotMsg = CreateIncrement(secId, time, QuoteChangeStates.SnapshotComplete, [1],
+			bids: [new QuoteChange(100m, 10m)],
+			asks: [new QuoteChange(101m, 20m)]);
+
+		manager.ProcessOutMessage(snapshotMsg);
+
+		// Send increment
+		var incrementMsg = CreateIncrement(secId, time.AddSeconds(1), QuoteChangeStates.Increment, [1],
+			bids: [new QuoteChange(100m, 15m)], // Update bid volume
+			asks: []);
+
+		var (forward, extraOut) = manager.ProcessOutMessage(incrementMsg);
+
+		forward.AssertNull();
+		extraOut.Length.AssertEqual(1);
+
+		var built = (QuoteChangeMessage)extraOut[0];
+		built.State.AssertNull();
+		built.Bids[0].Price.AssertEqual(100m);
+		built.Bids[0].Volume.AssertEqual(15m); // Updated volume
+	}
+
+	[TestMethod]
+	public void QuoteChange_NoState_PassesThrough()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		// Send quote change without state (full book, not incremental)
+		var quoteMsg = new QuoteChangeMessage
+		{
+			SecurityId = secId,
+			ServerTime = DateTime.UtcNow,
+			State = null,
+			Bids = [new QuoteChange(100m, 10m)],
+			Asks = [new QuoteChange(101m, 20m)],
+		};
+		quoteMsg.SetSubscriptionIds([1]);
+
+		var (forward, extraOut) = manager.ProcessOutMessage(quoteMsg);
+
+		forward.AssertSame(quoteMsg);
+		extraOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void SubscriptionResponse_Error_RemovesSubscription()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		// Send error response
+		var errorResponse = new SubscriptionResponseMessage
+		{
+			OriginalTransactionId = 1,
+			Error = new InvalidOperationException("Test error")
+		};
+
+		var (forward, extraOut) = manager.ProcessOutMessage(errorResponse);
+
+		forward.AssertSame(errorResponse);
+		extraOut.Length.AssertEqual(0);
+
+		// Subscription should be removed - quote change should pass through (no subscription to build)
+		var quoteMsg = CreateIncrement(secId, DateTime.UtcNow, QuoteChangeStates.SnapshotComplete, [1],
+			bids: [new QuoteChange(100m, 10m)],
+			asks: [new QuoteChange(101m, 20m)]);
+
+		(forward, extraOut) = manager.ProcessOutMessage(quoteMsg);
+
+		// No subscription found so original message passes through
+		forward.AssertSame(quoteMsg);
+		extraOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void SubscriptionFinished_RemovesSubscription()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		// Send finished
+		var finishedMsg = new SubscriptionFinishedMessage { OriginalTransactionId = 1 };
+
+		var (forward, extraOut) = manager.ProcessOutMessage(finishedMsg);
+
+		forward.AssertSame(finishedMsg);
+		extraOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void Unsubscribe_RemovesSubscription()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		// Unsubscribe
+		var unsubscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = false,
+			TransactionId = 2,
+			OriginalTransactionId = 1,
+		};
+
+		var (toInner, toOut) = manager.ProcessInMessage(unsubscribeMsg);
+
+		toInner.Length.AssertEqual(1);
+		toInner[0].AssertSame(unsubscribeMsg);
+		toOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void SubscriptionOnline_MovesToOnline()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		// Mark as online
+		var onlineMsg = new SubscriptionOnlineMessage { OriginalTransactionId = 1 };
+
+		var (forward, extraOut) = manager.ProcessOutMessage(onlineMsg);
+
+		forward.AssertSame(onlineMsg);
+		extraOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void AllSecSubscription_AppendsToBuiltBook()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe to specific security
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(subscribeMsg);
+
+		// Subscribe to all securities
+		var allSecSubscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 99,
+			SecurityId = default,
+			DataType2 = DataType.MarketDepth,
+		};
+
+		manager.ProcessInMessage(allSecSubscribeMsg);
+
+		// Send snapshot
+		var snapshotMsg = CreateIncrement(secId, DateTime.UtcNow, QuoteChangeStates.SnapshotComplete, [1],
+			bids: [new QuoteChange(100m, 10m)],
+			asks: [new QuoteChange(101m, 20m)]);
+
+		var (forward, extraOut) = manager.ProcessOutMessage(snapshotMsg);
+
+		extraOut.Length.AssertEqual(1);
+		var built = (QuoteChangeMessage)extraOut[0];
+		built.GetSubscriptionIds().OrderBy(i => i).SequenceEqual([1L, 99L]).AssertTrue();
+	}
+
+	[TestMethod]
+	public void AllSecSubscription_MultipleSecurities_EachGetsCorrectSecurityId()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId1 = new SecurityId { SecurityCode = "MULTI1", BoardCode = "TEST" };
+		var secId2 = new SecurityId { SecurityCode = "MULTI2", BoardCode = "TEST" };
+		var secId3 = new SecurityId { SecurityCode = "MULTI3", BoardCode = "TEST" };
+
+		// Subscribe to ALL securities
+		manager.ProcessInMessage(new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 100,
+			SecurityId = default,
+			DataType2 = DataType.MarketDepth,
+		});
+
+		// Snapshot for MULTI1
+		var snap1 = CreateIncrement(secId1, DateTime.UtcNow, QuoteChangeStates.SnapshotComplete, [100],
+			bids: [new QuoteChange(100m, 10m)],
+			asks: [new QuoteChange(101m, 20m)]);
+		var (forward1, extra1) = manager.ProcessOutMessage(snap1);
+		forward1.AssertNull();
+		extra1.Length.AssertEqual(1);
+		((QuoteChangeMessage)extra1[0]).SecurityId.AssertEqual(secId1);
+
+		// Snapshot for MULTI2 — must NOT get MULTI1's SecurityId
+		var snap2 = CreateIncrement(secId2, DateTime.UtcNow, QuoteChangeStates.SnapshotComplete, [100],
+			bids: [new QuoteChange(200m, 30m)],
+			asks: [new QuoteChange(201m, 40m)]);
+		var (forward2, extra2) = manager.ProcessOutMessage(snap2);
+		forward2.AssertNull();
+		extra2.Length.AssertEqual(1);
+		((QuoteChangeMessage)extra2[0]).SecurityId.AssertEqual(secId2);
+
+		// Snapshot for MULTI3
+		var snap3 = CreateIncrement(secId3, DateTime.UtcNow, QuoteChangeStates.SnapshotComplete, [100],
+			bids: [new QuoteChange(300m, 50m)],
+			asks: [new QuoteChange(301m, 60m)]);
+		var (forward3, extra3) = manager.ProcessOutMessage(snap3);
+		forward3.AssertNull();
+		extra3.Length.AssertEqual(1);
+		((QuoteChangeMessage)extra3[0]).SecurityId.AssertEqual(secId3);
+
+		// Verify bids/asks are correct per security (not mixed)
+		((QuoteChangeMessage)extra1[0]).Bids[0].Price.AssertEqual(100m);
+		((QuoteChangeMessage)extra2[0]).Bids[0].Price.AssertEqual(200m);
+		((QuoteChangeMessage)extra3[0]).Bids[0].Price.AssertEqual(300m);
+	}
+
+	[TestMethod]
+	public void NonMarketDataMessage_PassesThrough()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var connectMsg = new ConnectMessage();
+
+		var (toInner, toOut) = manager.ProcessInMessage(connectMsg);
+
+		toInner.Length.AssertEqual(1);
+		toInner[0].AssertSame(connectMsg);
+		toOut.Length.AssertEqual(0);
+
+		var disconnectMsg = new DisconnectMessage();
+		var (forward, extraOut) = manager.ProcessOutMessage(disconnectMsg);
+
+		forward.AssertSame(disconnectMsg);
+		extraOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void MarketData_NonDepth_PassesThrough()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		// Subscribe to ticks (not depth)
+		var subscribeMsg = new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.Ticks,
+		};
+
+		var (toInner, toOut) = manager.ProcessInMessage(subscribeMsg);
+
+		toInner.Length.AssertEqual(1);
+		toInner[0].AssertSame(subscribeMsg);
+		toOut.Length.AssertEqual(0);
+	}
+
+	[TestMethod]
+	public void ProcessOutMessage_MultipleSubscriptions_OnlySecondId_ShouldProcessIncrement()
+	{
+		var logReceiver = new TestReceiver();
+		var manager = new OrderBookIncrementManager(logReceiver, new OrderBookIncrementManagerState());
+
+		var secId = Helper.CreateSecurityId();
+
+		manager.ProcessInMessage(new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 1,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		});
+
+		manager.ProcessInMessage(new MarketDataMessage
+		{
+			IsSubscribe = true,
+			TransactionId = 2,
+			SecurityId = secId,
+			DataType2 = DataType.MarketDepth,
+		});
+
+		manager.ProcessOutMessage(new SubscriptionOnlineMessage { OriginalTransactionId = 1 });
+		manager.ProcessOutMessage(new SubscriptionOnlineMessage { OriginalTransactionId = 2 });
+
+		var snapshot = CreateIncrement(secId, DateTime.UtcNow, QuoteChangeStates.SnapshotComplete, [1, 2],
+			bids: [new QuoteChange(100m, 10m)],
+			asks: [new QuoteChange(101m, 20m)]);
+		manager.ProcessOutMessage(snapshot);
+
+		// Increment with only second subscription id — both IDs share the same builder
+		var increment = CreateIncrement(secId, DateTime.UtcNow.AddSeconds(1), QuoteChangeStates.Increment, [2],
+			bids: [new QuoteChange(99m, 5m)]);
+		var (forward, extraOut) = manager.ProcessOutMessage(increment);
+
+		extraOut.Length.AssertEqual(1, "Increment should be processed even when it has only second subscription id");
+
+		var book = (QuoteChangeMessage)extraOut[0];
+		book.GetSubscriptionIds().OrderBy(i => i).SequenceEqual([1L, 2L]).AssertTrue(
+			"Book should have both subscription ids since they're merged online");
+	}
+}

@@ -1,0 +1,59 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="AvaloniaSample.Maps.World.View"
+             xmlns:lvc="using:LiveChartsCore.SkiaSharpView.Avalonia"
+             xmlns:vms="using:ViewModelsSamples.Maps.World"
+             xmlns:m="using:LiveChartsCore.Measure"
+             x:DataType="vms:ViewModel">
+    <UserControl.DataContext>
+        <vms:ViewModel/>
+    </UserControl.DataContext>
+    <Grid RowDefinitions="Auto,*">
+
+        <!-- Tooltip settings panel -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12" Margin="8">
+            <TextBlock Text="Tooltip:" VerticalAlignment="Center"/>
+
+            <ComboBox x:Name="TooltipPositionCombo" SelectedIndex="1" VerticalAlignment="Center">
+                <ComboBoxItem Content="Hidden" Tag="{x:Static m:TooltipPosition.Hidden}"/>
+                <ComboBoxItem Content="Auto" Tag="{x:Static m:TooltipPosition.Auto}"/>
+                <ComboBoxItem Content="Top (wedge below)" Tag="{x:Static m:TooltipPosition.Top}"/>
+                <ComboBoxItem Content="Bottom (wedge above)" Tag="{x:Static m:TooltipPosition.Bottom}"/>
+            </ComboBox>
+
+            <TextBlock Text="Text size:" VerticalAlignment="Center"/>
+            <NumericUpDown x:Name="TextSizeUpDown" Value="14" Minimum="8" Maximum="32"
+                           Increment="1" Width="130" VerticalAlignment="Center"
+                           ValueChanged="OnTextSizeChanged"/>
+
+            <Button Content="Toggle Brazil" Command="{Binding ToggleBrazilCommand}"/>
+            <Button Content="Clear Series" x:Name="ClearSeriesBtn"/>
+            <Button Content="Reset Zoom" x:Name="ResetZoomBtn"/>
+
+            <TextBlock Text="Border:" VerticalAlignment="Center"/>
+            <NumericUpDown x:Name="BorderWidthUpDown" Value="1" Minimum="0" Maximum="10"
+                           Increment="0.5" Width="110" VerticalAlignment="Center"
+                           ValueChanged="OnBorderWidthChanged"/>
+            <ComboBox x:Name="BorderColorCombo" SelectedIndex="0" VerticalAlignment="Center">
+                <ComboBoxItem Content="White" Tag="White"/>
+                <ComboBoxItem Content="Black" Tag="Black"/>
+                <ComboBoxItem Content="Gray" Tag="Gray"/>
+                <ComboBoxItem Content="Red" Tag="Red"/>
+                <ComboBoxItem Content="None" Tag="None"/>
+            </ComboBox>
+
+            <TextBlock x:Name="ClickedLandText" Text="Click a country..." VerticalAlignment="Center"
+                       Margin="12,0,0,0" Foreground="Gray"/>
+        </StackPanel>
+
+        <lvc:GeoMap
+            Grid.Row="1"
+            x:Name="geoMap"
+            Series="{Binding Series}"
+            MapProjection="Mercator">
+        </lvc:GeoMap>
+    </Grid>
+</UserControl>

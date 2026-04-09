@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeSight - AI Trading Intelligence</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #0a0e1a;
+            color: #f1f5f9;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: #111827;
+            border-bottom: 1px solid #2d3748;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 1.5em;
+            color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header h1 .accent { color: #22c55e; }
+        .header .status {
+            display: flex;
+            gap: 16px;
+            font-size: 0.85em;
+            color: #94a3b8;
+        }
+        .header .status .dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+
+        /* Tabs */
+        .tab-bar {
+            background: #111827;
+            display: flex;
+            border-bottom: 2px solid #2d3748;
+            padding: 0 24px;
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 12px 20px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover { color: #f1f5f9; }
+        .tab-btn.active {
+            color: #22c55e;
+            border-bottom-color: #22c55e;
+        }
+
+        /* Content */
+        .content { padding: 24px; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+
+        /* Alerts tab styles */
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+        .settings-row label { color: #94a3b8; }
+        .settings-label { display: flex; align-items: center; gap: 8px; color: #f1f5f9; cursor: pointer; }
+        .settings-input {
+            background: #0a0e1a;
+            border: 1px solid #2d3748;
+            border-radius: 4px;
+            color: #f1f5f9;
+            padding: 4px 8px;
+            font-size: 0.85em;
+            width: 55%;
+        }
+        .settings-input:focus { outline: none; border-color: #22c55e; }
+        .btn-save {
+            background: #22c55e; color: #0a0e1a; border: none;
+            border-radius: 4px; padding: 8px 16px; cursor: pointer; font-weight: 700;
+        }
+        .btn-test {
+            background: #3b82f6; color: #fff; border: none;
+            border-radius: 4px; padding: 8px 16px; cursor: pointer; font-weight: 700;
+        }
+        .btn-small {
+            background: none; border: 1px solid #2d3748; color: #94a3b8;
+            border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 0.8em;
+        }
+        .alert-type-signal { color: #3b82f6; }
+        .alert-type-trade  { color: #22c55e; }
+        .alert-type-summary { color: #f59e0b; }
+        .alert-type-evolved { color: #a855f7; }
+
+        /* Cards */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: #1a2035;
+            border: 1px solid #2d3748;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .card h3 {
+            font-size: 0.8em;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .card .value {
+            font-size: 1.8em;
+            font-weight: 700;
+            color: #f1f5f9;
+        }
+        .card .value.green { color: #22c55e; }
+        .card .value.red { color: #ef4444; }
+        .card .value.blue { color: #3b82f6; }
+        .card .sub {
+            font-size: 0.8em;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+
+        /* Tables */
+        .table-card {
+            background: #1a2035;
+            border: 1px solid #2d3748;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+        .table-card .table-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #2d3748;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .table-card .table-header h2 {
+            font-size: 1em;
+            color: #f1f5f9;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 0.75em;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: #111827;
+            border-bottom: 1px solid #2d3748;
+        }
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(45,55,72,0.5);
+            font-size: 0.9em;
+        }
+        tr:hover { background: rgba(34,197,94,0.03); }
+        .positive { color: #22c55e; font-weight: 600; }
+        .negative { color: #ef4444; font-weight: 600; }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 700;
+        }
+        .badge-green { background: rgba(34,197,94,0.15); color: #22c55e; }
+        .badge-red { background: rgba(239,68,68,0.15); color: #ef4444; }
+        .badge-blue { background: rgba(59,130,246,0.15); color: #3b82f6; }
+        .badge-yellow { background: rgba(234,179,8,0.15); color: #eab308; }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #22c55e;
+            color: #0a0e1a;
+        }
+        .btn-primary:hover { background: #16a34a; }
+        .btn-primary:disabled {
+            background: #2d3748;
+            color: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        /* Loading / Empty */
+        .loading-msg, .empty-msg {
+            text-align: center;
+            padding: 40px;
+            color: #94a3b8;
+        }
+        .loading-msg::before { content: "⏳ "; }
+        .empty-msg::before { content: "📭 "; }
+
+        /* Winner banner */
+        .winner-banner {
+            background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(59,130,246,0.05));
+            border: 1px solid rgba(34,197,94,0.3);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .winner-banner .trophy { font-size: 2em; margin-right: 16px; }
+        .winner-banner .info h2 { color: #22c55e; font-size: 1.2em; }
+        .winner-banner .info p { color: #94a3b8; font-size: 0.9em; margin-top: 4px; }
+        .winner-banner .stats-mini {
+            display: flex;
+            gap: 24px;
+        }
+        .winner-banner .stats-mini div { text-align: center; }
+        .winner-banner .stats-mini .num { font-size: 1.4em; font-weight: 700; color: #f1f5f9; }
+        .winner-banner .stats-mini .lbl { font-size: 0.75em; color: #94a3b8; }
+
+        /* Section label */
+        .section-label {
+            font-size: 0.85em;
+            color: #94a3b8;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Two-column grid */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        @media (max-width: 900px) {
+            .grid-2 { grid-template-columns: 1fr; }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0a0e1a; }
+        ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>📊 Trade<span class="accent">Sight</span></h1>
+    <div class="status">
+        <span><span class="dot"></span> Live</span>
+        <span id="header-time">--:--</span>
+        <span id="header-refresh">Auto-refresh: 30s</span>
+    </div>
+</div>
+
+<div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('markets')">📈 Markets</button>
+    <button class="tab-btn" onclick="switchTab('strategy-lab')">🧪 Strategy Lab</button>
+    <button class="tab-btn" onclick="switchTab('paper-trading')">💰 Paper Trading</button>
+    <button class="tab-btn" onclick="switchTab('system')">⚙️ System</button>
+    <button class="tab-btn" onclick="switchTab('alerts')">🔔 Alerts</button>
+</div>
+
+<div class="content">
+
+    <!-- ===== MARKETS TAB ===== -->
+    <div id="tab-markets" class="tab-panel active">
+        <div class="section-label">📊 Stock Opportunities</div>
+        <div class="stats-row" id="stock-stats">
+            <div class="card"><div class="value">--</div><h3>Loading...</h3></div>
+        </div>
+        <div class="table-card">
+            <div class="table-header">
+                <h2>Top Stock Signals</h2>
+                <span class="badge badge-blue" id="stock-count">--</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Score</th>
+                        <th>Direction</th>
+                        <th>Confidence</th>
+                        <th>Price</th>
+                        <th>Technical</th>
+                        <th>Momentum</th>
+                        <th>Trend</th>
+                    </tr>
+                </thead>
+                <tbody id="stock-opportunities">
+                    <tr><td colspan="8" class="loading-msg">Loading stock data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section-label">🌐 Polymarket Opportunities</div>
+        <div class="stats-row" id="poly-stats">
+            <div class="card"><div class="value">--</div><h3>Loading...</h3></div>
+        </div>
+        <div class="table-card">
+            <div class="table-header">
+                <h2>High-Volume Prediction Markets</h2>
+                <span class="badge badge-blue" id="poly-count">--</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Market</th>
+                        <th>Category</th>
+                        <th>Volume</th>
+                        <th>Yes</th>
+                        <th>No</th>
+                        <th>Spread</th>
+                        <th>Updated</th>
+                    </tr>
+                </thead>
+                <tbody id="poly-opportunities">
+                    <tr><td colspan="7" class="loading-msg">Loading Polymarket data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ===== STRATEGY LAB TAB ===== -->
+    <div id="tab-strategy-lab" class="tab-panel">
+        <div class="stats-row" id="strat-stats">
+            <div class="card"><div class="value">--</div><h3>Loading...</h3></div>
+        </div>
+
+        <div id="winner-section"></div>
+
+        <div style="margin-bottom: 20px;">
+            <button class="btn btn-primary" id="start-tournament-btn" onclick="startTournament()">
+                ▶ Run New Tournament
+            </button>
+            <span id="tournament-status-msg" style="margin-left: 12px; color: #94a3b8; font-size: 0.85em;"></span>
+        </div>
+
+        <div class="grid-2">
+            <div class="table-card">
+                <div class="table-header"><h2>🏆 Tournament Participants</h2></div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Strategy</th>
+                            <th>Avg Score</th>
+                            <th>Wins</th>
+                            <th>Losses</th>
+                            <th>Rounds</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tournament-participants">
+                        <tr><td colspan="6" class="empty-msg">No tournament run yet — click "Run New Tournament" above</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="table-card">
+                <div class="table-header"><h2>📜 Tournament History</h2></div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Winner</th>
+                            <th>Rounds</th>
+                            <th>Strategies</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tournament-history">
+                        <tr><td colspan="4" class="empty-msg">No history yet</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="table-card" style="margin-top: 24px;">
+            <div class="table-header"><h2>💀 Elimination Log</h2></div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Strategy</th>
+                        <th>Round</th>
+                        <th>Reason</th>
+                        <th>Final Score</th>
+                    </tr>
+                </thead>
+                <tbody id="elimination-log">
+                    <tr><td colspan="4" class="empty-msg">No eliminations yet</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ===== PAPER TRADING TAB ===== -->
+    <div id="tab-paper-trading" class="tab-panel">
+        <div class="stats-row" id="paper-stats">
+            <div class="card">
+                <h3>Portfolio Value</h3>
+                <div class="value green">$10,000</div>
+                <div class="sub">Starting balance</div>
+            </div>
+            <div class="card">
+                <h3>Open Positions</h3>
+                <div class="value blue">0</div>
+                <div class="sub">No active trades</div>
+            </div>
+            <div class="card">
+                <h3>Total P&L</h3>
+                <div class="value">$0.00</div>
+                <div class="sub">No trades executed</div>
+            </div>
+            <div class="card">
+                <h3>Win Rate</h3>
+                <div class="value">--</div>
+                <div class="sub">Needs trades</div>
+            </div>
+        </div>
+
+        <div class="table-card">
+            <div class="table-header">
+                <h2>📋 Active Positions</h2>
+                <span class="badge badge-yellow">Demo Mode</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Strategy</th>
+                        <th>Side</th>
+                        <th>Entry Price</th>
+                        <th>Current</th>
+                        <th>P&L</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody id="paper-positions">
+                    <tr><td colspan="7" class="empty-msg">No active positions — run a tournament to find winning strategies, then deploy to paper trading</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="table-card">
+            <div class="table-header"><h2>📈 Trade History</h2></div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Price</th>
+                        <th>P&L</th>
+                        <th>Strategy</th>
+                    </tr>
+                </thead>
+                <tbody id="paper-history">
+                    <tr><td colspan="6" class="empty-msg">No trade history yet. Configure API keys in Settings to enable live paper trading.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card" style="margin-top: 16px; border: 1px dashed #2d3748;">
+            <h3 style="margin-bottom: 8px;">🔧 Paper Trading Setup</h3>
+            <p style="color: #94a3b8; font-size: 0.9em; line-height: 1.6;">
+                Paper trading uses tournament-winning strategies with live market data via Alpaca.<br>
+                <strong>Symbols:</strong> AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, NFLX<br>
+                <strong>Status:</strong> <span class="badge badge-yellow">Demo Mode — No API keys configured</span>
+            </p>
+        </div>
+    </div>
+
+    <!-- ===== SYSTEM TAB ===== -->
+    <div id="tab-system" class="tab-panel">
+        <div class="stats-row" id="system-stats">
+            <div class="card">
+                <h3>Server Status</h3>
+                <div class="value green">Online</div>
+                <div class="sub">Port 5001</div>
+            </div>
+            <div class="card">
+                <h3>Test Suite</h3>
+                <div class="value green">94/96</div>
+                <div class="sub">Tests passing</div>
+            </div>
+            <div class="card">
+                <h3>Uptime</h3>
+                <div class="value blue" id="sys-uptime">--</div>
+                <div class="sub">Since last restart</div>
+            </div>
+            <div class="card">
+                <h3>Auto-Refresh</h3>
+                <div class="value">30s</div>
+                <div class="sub">All tabs</div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="table-card">
+                <div class="table-header"><h2>📊 Module Stats</h2></div>
+                <table>
+                    <thead><tr><th>Module</th><th>Status</th><th>Details</th></tr></thead>
+                    <tbody id="module-stats">
+                        <tr><td colspan="3" class="loading-msg">Loading module stats...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="table-card">
+                <div class="table-header"><h2>📡 API Endpoints</h2></div>
+                <table>
+                    <thead><tr><th>Endpoint</th><th>Status</th><th>Response</th></tr></thead>
+                    <tbody id="endpoint-health">
+                        <tr><td colspan="3" class="loading-msg">Checking endpoints...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+<!-- ===== ALERTS TAB ===== -->
+<div id="tab-alerts" class="tab-panel">
+
+  <!-- Summary stats -->
+  <div class="stats-row" id="alerts-stats-row">
+    <div class="card">
+      <h3>Total Alerts</h3>
+      <div class="value blue" id="alerts-total">--</div>
+      <div class="sub">All time</div>
+    </div>
+    <div class="card">
+      <h3>Alerts Enabled</h3>
+      <div class="value" id="alerts-enabled-val">--</div>
+      <div class="sub">Master switch</div>
+    </div>
+    <div class="card">
+      <h3>Email Channel</h3>
+      <div class="value" id="alerts-email-val">--</div>
+      <div class="sub">SMTP</div>
+    </div>
+    <div class="card">
+      <h3>Webhook Channel</h3>
+      <div class="value" id="alerts-webhook-val">--</div>
+      <div class="sub">HTTP POST</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Recent alerts history -->
+    <div class="table-card">
+      <div class="table-header">
+        <h2>📋 Recent Alerts</h2>
+        <button class="btn-small" onclick="loadAlertsData()">↺ Refresh</button>
+      </div>
+      <table>
+        <thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead>
+        <tbody id="alerts-history">
+          <tr><td colspan="3" class="loading-msg">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Settings -->
+    <div class="table-card">
+      <div class="table-header"><h2>⚙️ Alert Settings</h2></div>
+      <div style="padding: 16px;">
+        <form id="alerts-settings-form">
+
+          <!-- Master switch -->
+          <div class="settings-row">
+            <label class="settings-label">
+              <input type="checkbox" id="cfg-alerts-enabled"> Enable Alerts
+            </label>
+          </div>
+
+          <hr style="border-color:#2d3748; margin:12px 0;">
+
+          <!-- Email settings -->
+          <div class="settings-section">
+            <h3 style="color:#94a3b8;font-size:.8em;text-transform:uppercase;margin-bottom:10px;">Email (SMTP)</h3>
+            <div class="settings-row">
+              <label class="settings-label">
+                <input type="checkbox" id="cfg-email-enabled"> Enable Email
+              </label>
+            </div>
+            <div class="settings-row"><label>SMTP Host</label><input class="settings-input" type="text" id="cfg-smtp-host" placeholder="smtp.gmail.com"></div>
+            <div class="settings-row"><label>SMTP Port</label><input class="settings-input" type="number" id="cfg-smtp-port" placeholder="587"></div>
+            <div class="settings-row">
+              <label class="settings-label"><input type="checkbox" id="cfg-smtp-tls"> Use TLS</label>
+            </div>
+            <div class="settings-row"><label>Username</label><input class="settings-input" type="text" id="cfg-smtp-user" placeholder="you@gmail.com"></div>
+            <div class="settings-row"><label>Password</label><input class="settings-input" type="password" id="cfg-smtp-pass" placeholder="app password"></div>
+            <div class="settings-row"><label>From Address</label><input class="settings-input" type="text" id="cfg-email-from" placeholder="tradesight@example.com"></div>
+            <div class="settings-row"><label>To Addresses</label><input class="settings-input" type="text" id="cfg-email-to" placeholder="you@example.com, other@example.com"></div>
+          </div>
+
+          <hr style="border-color:#2d3748; margin:12px 0;">
+
+          <!-- Webhook settings -->
+          <div class="settings-section">
+            <h3 style="color:#94a3b8;font-size:.8em;text-transform:uppercase;margin-bottom:10px;">Webhook</h3>
+            <div class="settings-row">
+              <label class="settings-label"><input type="checkbox" id="cfg-webhook-enabled"> Enable Webhook</label>
+            </div>
+            <div class="settings-row"><label>Webhook URL</label><input class="settings-input" type="url" id="cfg-webhook-url" placeholder="https://hooks.example.com/..."></div>
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:16px;">
+            <button type="button" class="btn-save" onclick="saveAlertsConfig()">💾 Save Settings</button>
+            <button type="button" class="btn-test" onclick="testAlert()">🧪 Send Test</button>
+          </div>
+          <div id="alerts-save-status" style="margin-top:8px;font-size:.85em;"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+</div>
+
+<script>
+    let activeTab = 'markets';
+    const startTime = Date.now();
+
+    // Update clock
+    setInterval(() => {
+        document.getElementById('header-time').textContent = new Date().toLocaleTimeString();
+        const upMin = Math.floor((Date.now() - startTime) / 60000);
+        const el = document.getElementById('sys-uptime');
+        if (el) el.textContent = upMin < 60 ? upMin + 'm' : Math.floor(upMin/60) + 'h ' + (upMin%60) + 'm';
+    }, 1000);
+
+    function switchTab(name) {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        event.target.classList.add('active');
+        activeTab = name;
+        loadTabData(name);
+        if (name === 'alerts') loadAlertsData();
+    }
+
+    function loadTabData(name) {
+        if (name === 'markets') loadMarkets();
+        else if (name === 'strategy-lab') loadStrategyLab();
+        else if (name === 'system') loadSystem();
+        // paper-trading is mostly static until API keys configured
+    }
+
+    function fmt(n, dec=1) {
+        if (n === null || n === undefined) return '--';
+        return typeof n === 'number' ? n.toFixed(dec) : n;
+    }
+    function fmtMoney(n) {
+        if (n === null || n === undefined) return '--';
+        return '$' + Number(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+    function pnlClass(n) { return n > 0 ? 'positive' : n < 0 ? 'negative' : ''; }
+
+    // ===== MARKETS =====
+    function loadMarkets() {
+        // Stock stats
+        fetch('/api/stocks/stats').then(r => r.json()).then(d => {
+            if (d.error) {
+                document.getElementById('stock-stats').innerHTML = `
+                    <div class="card"><h3>Scanner</h3><div class="value badge-yellow">Demo Mode</div><div class="sub">${d.error}</div></div>`;
+                return;
+            }
+            document.getElementById('stock-stats').innerHTML = `
+                <div class="card"><h3>Stocks Scanned</h3><div class="value blue">${d.total_scanned}</div></div>
+                <div class="card"><h3>Opportunities</h3><div class="value green">${d.opportunities_found}</div></div>
+                <div class="card"><h3>Top Pick</h3><div class="value">${d.top_opportunity || '--'}</div><div class="sub">Score: ${fmt(d.top_score)}</div></div>
+                <div class="card"><h3>Scan Time</h3><div class="value">${fmt(d.scan_duration)}s</div><div class="sub">${d.last_scan ? new Date(d.last_scan).toLocaleTimeString() : '--'}</div></div>`;
+        }).catch(() => {
+            document.getElementById('stock-stats').innerHTML = '<div class="card"><div class="value red">Error</div><h3>Failed to load</h3></div>';
+        });
+
+        // Stock opportunities
+        fetch('/api/stocks/opportunities').then(r => r.json()).then(data => {
+            if (data.error) {
+                document.getElementById('stock-opportunities').innerHTML = `<tr><td colspan="8" class="empty-msg">Demo mode — ${data.error}</td></tr>`;
+                document.getElementById('stock-count').textContent = '0';
+                return;
+            }
+            const arr = Array.isArray(data) ? data : (data.opportunities || []);
+            document.getElementById('stock-count').textContent = arr.length + ' signals';
+            if (arr.length === 0) {
+                document.getElementById('stock-opportunities').innerHTML = '<tr><td colspan="8" class="empty-msg">No opportunities found in latest scan</td></tr>';
+                return;
+            }
+            document.getElementById('stock-opportunities').innerHTML = arr.map(o => `
+                <tr>
+                    <td><strong>${o.symbol}</strong></td>
+                    <td><span class="badge badge-green">${fmt(o.overall_score)}</span></td>
+                    <td><span class="badge ${o.direction === 'bullish' ? 'badge-green' : 'badge-red'}">${o.direction || '--'}</span></td>
+                    <td><span class="badge badge-blue">${o.confidence || '--'}</span></td>
+                    <td>${o.current_price ? fmtMoney(o.current_price) : '--'}</td>
+                    <td>${fmt(o.technical_score)}</td>
+                    <td>${fmt(o.momentum_score)}</td>
+                    <td>${fmt(o.trend_score)}</td>
+                </tr>
+            `).join('');
+        }).catch(() => {
+            document.getElementById('stock-opportunities').innerHTML = '<tr><td colspan="8" class="empty-msg">Failed to load stock data</td></tr>';
+        });
+
+        // Polymarket stats
+        fetch('/api/polymarket/stats').then(r => r.json()).then(d => {
+            document.getElementById('poly-stats').innerHTML = `
+                <div class="card"><h3>Total Markets</h3><div class="value blue">${d.total_markets || 0}</div></div>
+                <div class="card"><h3>Active</h3><div class="value green">${d.active_markets || 0}</div></div>
+                <div class="card"><h3>High Volume</h3><div class="value">${d.high_volume_markets || 0}</div></div>
+                <div class="card"><h3>Last Scan</h3><div class="value">${d.last_scan ? new Date(d.last_scan).toLocaleDateString() : 'Never'}</div></div>`;
+        }).catch(() => {});
+
+        // Polymarket opportunities
+        fetch('/api/polymarket/opportunities').then(r => r.json()).then(data => {
+            const arr = Array.isArray(data) ? data : [];
+            document.getElementById('poly-count').textContent = arr.length + ' markets';
+            if (arr.length === 0) {
+                document.getElementById('poly-opportunities').innerHTML = '<tr><td colspan="7" class="empty-msg">No prediction markets found</td></tr>';
+                return;
+            }
+            document.getElementById('poly-opportunities').innerHTML = arr.map(o => {
+                const spread = o.yes_price && o.no_price ? Math.abs(o.yes_price - o.no_price).toFixed(3) : '--';
+                return `
+                <tr>
+                    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(o.question||'').replace(/"/g,'&quot;')}">${o.question || '--'}</td>
+                    <td><span class="badge badge-blue">${o.category || 'Unknown'}</span></td>
+                    <td>${o.volume ? '$' + Number(o.volume).toLocaleString() : '--'}</td>
+                    <td class="positive">${o.yes_price != null ? '$' + Number(o.yes_price).toFixed(3) : '--'}</td>
+                    <td class="negative">${o.no_price != null ? '$' + Number(o.no_price).toFixed(3) : '--'}</td>
+                    <td>${spread}</td>
+                    <td>${o.last_updated ? new Date(o.last_updated).toLocaleDateString() : '--'}</td>
+                </tr>`;
+            }).join('');
+        }).catch(() => {});
+    }
+
+    // ===== STRATEGY LAB =====
+    let lastTournamentData = null;
+
+    function loadStrategyLab() {
+        // Load stats
+        fetch('/api/strategy-lab/stats').then(r => r.json()).then(d => {
+            document.getElementById('strat-stats').innerHTML = `
+                <div class="card"><h3>Strategies Tested</h3><div class="value blue">${d.strategies_tested || 0}</div></div>
+                <div class="card"><h3>Tournament Winner</h3><div class="value green">${d.winner && d.winner !== 'None' ? d.winner : '--'}</div></div>
+                <div class="card"><h3>Winner Score</h3><div class="value">${d.winner_score ? fmt(d.winner_score, 3) : '--'}</div></div>
+                <div class="card"><h3>Rounds</h3><div class="value">${d.rounds_completed || 0}</div></div>`;
+        }).catch(() => {});
+
+        // Load tournament status
+        fetch('/api/strategy-lab/status').then(r => r.json()).then(d => {
+            const btn = document.getElementById('start-tournament-btn');
+            if (d.in_progress) {
+                btn.disabled = true;
+                document.getElementById('tournament-status-msg').textContent = '⏳ Tournament in progress...';
+            } else {
+                btn.disabled = false;
+                document.getElementById('tournament-status-msg').textContent = d.has_results ? '✅ Results available' : '';
+            }
+        }).catch(() => {});
+
+        // Load latest results if available
+        fetch('/api/strategy-lab/results').then(r => {
+            if (!r.ok) return null;
+            return r.json();
+        }).then(data => {
+            if (!data || data.error) return;
+            lastTournamentData = data;
+            renderTournamentResults(data);
+        }).catch(() => {});
+
+        // Load history
+        fetch('/api/strategy-lab/history').then(r => r.json()).then(data => {
+            if (!Array.isArray(data) || data.length === 0) {
+                document.getElementById('tournament-history').innerHTML = '<tr><td colspan="4" class="empty-msg">No history yet</td></tr>';
+                return;
+            }
+            document.getElementById('tournament-history').innerHTML = data.map(h => `
+                <tr>
+                    <td>${new Date(h.timestamp).toLocaleDateString()}</td>
+                    <td><strong class="positive">${h.winner || '--'}</strong></td>
+                    <td>${h.rounds_completed}</td>
+                    <td>${h.participants_count}</td>
+                </tr>
+            `).join('');
+        }).catch(() => {});
+    }
+
+    function renderTournamentResults(data) {
+        // Winner banner
+        if (data.winner) {
+            document.getElementById('winner-section').innerHTML = `
+                <div class="winner-banner">
+                    <div style="display:flex;align-items:center;">
+                        <span class="trophy">🏆</span>
+                        <div class="info">
+                            <h2>${data.winner.name}</h2>
+                            <p>Tournament Champion</p>
+                        </div>
+                    </div>
+                    <div class="stats-mini">
+                        <div><div class="num positive">${fmt(data.winner.avg_score, 3)}</div><div class="lbl">Avg Score</div></div>
+                        <div><div class="num">${data.winner.wins || 0}</div><div class="lbl">Wins</div></div>
+                        <div><div class="num">${fmt(data.winner.total_score, 2)}</div><div class="lbl">Total Score</div></div>
+                    </div>
+                </div>`;
+        } else {
+            document.getElementById('winner-section').innerHTML = '';
+        }
+
+        // Participants table
+        if (data.participants && data.participants.length > 0) {
+            const sorted = [...data.participants].sort((a, b) => b.avg_score - a.avg_score);
+            document.getElementById('tournament-participants').innerHTML = sorted.map(p => `
+                <tr>
+                    <td><strong>${p.name}</strong></td>
+                    <td><span class="badge ${p.avg_score > 0 ? 'badge-green' : 'badge-red'}">${fmt(p.avg_score, 3)}</span></td>
+                    <td class="positive">${p.wins}</td>
+                    <td class="negative">${p.losses}</td>
+                    <td>${p.rounds_survived || '--'}</td>
+                    <td>${p.eliminated ? '<span class="badge badge-red">Eliminated</span>' : '<span class="badge badge-green">Survived</span>'}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Elimination log
+        if (data.eliminations && data.eliminations.length > 0) {
+            document.getElementById('elimination-log').innerHTML = data.eliminations.map(e => `
+                <tr>
+                    <td><strong>${e.name}</strong></td>
+                    <td>Round ${e.round}</td>
+                    <td>${e.reason || 'Bottom performer'}</td>
+                    <td class="negative">${fmt(e.final_score, 3)}</td>
+                </tr>
+            `).join('');
+        }
+    }
+
+    function startTournament() {
+        const btn = document.getElementById('start-tournament-btn');
+        btn.disabled = true;
+        document.getElementById('tournament-status-msg').textContent = '⏳ Running tournament... this may take a moment';
+
+        fetch('/api/strategy-lab/start-tournament', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({data_days: 100, elimination_rate: 0.3})
+        }).then(r => r.json()).then(data => {
+            btn.disabled = false;
+            if (data.error) {
+                document.getElementById('tournament-status-msg').textContent = '❌ ' + data.error;
+                return;
+            }
+            document.getElementById('tournament-status-msg').textContent = '✅ Tournament complete!';
+            lastTournamentData = data;
+            renderTournamentResults(data);
+            loadStrategyLab(); // Refresh stats + history
+        }).catch(err => {
+            btn.disabled = false;
+            document.getElementById('tournament-status-msg').textContent = '❌ Error: ' + err;
+        });
+    }
+
+    // ===== SYSTEM =====
+    function loadSystem() {
+        const endpoints = [
+            {url: '/api/polymarket/stats', name: 'Polymarket Stats'},
+            {url: '/api/polymarket/opportunities', name: 'Polymarket Opportunities'},
+            {url: '/api/stocks/stats', name: 'Stock Stats'},
+            {url: '/api/stocks/opportunities', name: 'Stock Opportunities'},
+            {url: '/api/strategy-lab/stats', name: 'Strategy Lab Stats'},
+            {url: '/api/strategy-lab/status', name: 'Tournament Status'},
+            {url: '/api/strategy-lab/history', name: 'Tournament History'},
+        ];
+
+        // Check each endpoint
+        Promise.all(endpoints.map(ep =>
+            fetch(ep.url).then(r => ({name: ep.name, status: r.status, ok: r.ok}))
+                .catch(() => ({name: ep.name, status: 'ERR', ok: false}))
+        )).then(results => {
+            document.getElementById('endpoint-health').innerHTML = results.map(r => `
+                <tr>
+                    <td><code>${r.name}</code></td>
+                    <td><span class="badge ${r.ok ? 'badge-green' : 'badge-red'}">${r.ok ? 'OK' : 'Error'}</span></td>
+                    <td>${r.status}</td>
+                </tr>
+            `).join('');
+        });
+
+        // Module stats
+        Promise.all([
+            fetch('/api/polymarket/stats').then(r => r.json()).catch(() => ({})),
+            fetch('/api/stocks/stats').then(r => r.json()).catch(() => ({})),
+            fetch('/api/strategy-lab/stats').then(r => r.json()).catch(() => ({})),
+        ]).then(([poly, stocks, strat]) => {
+            document.getElementById('module-stats').innerHTML = `
+                <tr>
+                    <td>Polymarket Scanner</td>
+                    <td><span class="badge ${poly.total_markets > 0 ? 'badge-green' : 'badge-yellow'}">${poly.total_markets > 0 ? 'Active' : 'No Data'}</span></td>
+                    <td>${poly.total_markets || 0} markets tracked</td>
+                </tr>
+                <tr>
+                    <td>Stock Scanner</td>
+                    <td><span class="badge ${stocks.total_scanned > 0 ? 'badge-green' : 'badge-yellow'}">${stocks.total_scanned > 0 ? 'Active' : 'Demo'}</span></td>
+                    <td>${stocks.opportunities_found || 0} opportunities found</td>
+                </tr>
+                <tr>
+                    <td>Strategy Lab</td>
+                    <td><span class="badge ${strat.strategies_tested > 0 ? 'badge-green' : 'badge-blue'}">Ready</span></td>
+                    <td>${strat.strategies_tested || 0} strategies tested</td>
+                </tr>
+                <tr>
+                    <td>Paper Trading</td>
+                    <td><span class="badge badge-yellow">Demo</span></td>
+                    <td>No API keys configured</td>
+                </tr>`;
+        });
+    }
+
+    // Initial load
+    document.addEventListener('DOMContentLoaded', () => {
+        loadMarkets();
+        document.getElementById('header-time').textContent = new Date().toLocaleTimeString();
+    });
+
+    // Auto-refresh every 30s
+    setInterval(() => loadTabData(activeTab), 30000);
+</script>
+
+</body>
+</html>

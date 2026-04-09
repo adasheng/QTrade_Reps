@@ -1,0 +1,84 @@
+{
+  "name": "TestStrategy",
+  "Symbol": "BTCUSD",
+  "TimeFrame": "00:05:00",
+  "StartDate": "2024-01-01T00:00:00Z",
+  "Volume": 100.0,
+  "IsLong": true,
+  "MaxPositions": 5,
+  "totalWorkingTime": "08:00:00",
+  "commission": 25.0,
+  "position": 100.0,
+  "PnL": 5000.0,
+  "slippage": 1.5,
+  "latency": "00:00:00.0500000",
+  "statistics": {
+    "WinRate": 0.65,
+    "MaxDrawdown": -500.0,
+    "TradesCount": 42,
+    "AverageTradeTime": "00:15:00",
+    "BestTradeDate": "2024-01-15T14:30:00Z",
+    "SharpeRatio": 1.85
+  },
+  "orders": [
+    {
+      "id": 1,
+      "transactionId": 100,
+      "securityId": "BTCUSD@CRYPTO",
+      "direction": 0,
+      "time": "2024-01-15T10:00:00Z",
+      "price": 50000.0,
+      "state": 2,
+      "balance": 0.0,
+      "volume": 1.0,
+      "type": 0
+    },
+    {
+      "id": 2,
+      "transactionId": 101,
+      "securityId": "BTCUSD@CRYPTO",
+      "direction": 1,
+      "time": "2024-01-15T11:00:00Z",
+      "price": 50500.0,
+      "state": 2,
+      "balance": 0.0,
+      "volume": 1.0,
+      "type": 0
+    }
+  ],
+  "trades": [
+    {
+      "id": 1001,
+      "transactionId": 100,
+      "securityId": "BTCUSD@CRYPTO",
+      "time": "2024-01-15T10:00:00Z",
+      "price": 50000.0,
+      "volume": 1.0,
+      "order": 1,
+      "PnL": 0.0,
+      "slippage": 0.0
+    },
+    {
+      "id": 1002,
+      "transactionId": 101,
+      "securityId": "BTCUSD@CRYPTO",
+      "time": "2024-01-15T11:00:00Z",
+      "price": 50500.0,
+      "volume": 1.0,
+      "order": 2,
+      "PnL": 500.0,
+      "slippage": 0.0
+    }
+  ],
+  "positions": [
+    {
+      "securityId": "BTCUSD@CRYPTO",
+      "portfolio": "TestPortfolio",
+      "openTime": "2024-01-15T10:00:00Z",
+      "openPrice": 50000.0,
+      "closeTime": "2024-01-15T11:00:00Z",
+      "closePrice": 50500.0,
+      "maxPosition": 1.0
+    }
+  ]
+}

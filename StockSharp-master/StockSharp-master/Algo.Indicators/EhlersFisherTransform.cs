@@ -1,0 +1,217 @@
+﻿namespace StockSharp.Algo.Indicators;
+
+/// <summary>
+/// Ehlers Fisher Transform indicator.
+/// </summary>
+[Display(
+	ResourceType = typeof(LocalizedStrings),
+	Name = LocalizedStrings.EFTKey,
+	Description = LocalizedStrings.EhlersFisherTransformKey)]
+[IndicatorIn(typeof(CandleIndicatorValue))]
+[Doc("topics/api/indicators/list_of_indicators/ehlers_fisher_transform.html")]
+[IndicatorOut(typeof(IEhlersFisherTransformValue))]
+public class EhlersFisherTransform : BaseComplexIndicator<IEhlersFisherTransformValue>
+{
+	private readonly DecimalBuffer _highBuffer;
+	private readonly DecimalBuffer _lowBuffer;
+	private decimal _prevValue;
+	private decimal _currValue;
+
+	/// <summary>
+	/// Main line.
+	/// </summary>
+	[Browsable(false)]
+	public EhlersFisherTransformLine MainLine { get; }
+
+	/// <summary>
+	/// Trigger line.
+	/// </summary>
+	[Browsable(false)]
+	public EhlersFisherTransformLine TriggerLine { get; }
+
+	/// <summary>
+	/// Initializes a new instance of the <see cref="EhlersFisherTransform"/>.
+	/// </summary>
+	public EhlersFisherTransform()
+	{
+		_highBuffer = new(1) { Stats = CircularBufferStats.Max };
+		_lowBuffer = new(1) { Stats = CircularBufferStats.Min };
+
+		MainLine = new();
+		TriggerLine = new();
+
+		AddInner(MainLine);
+		AddInner(TriggerLine);
+
+		Length = 10;
+	}
+
+	private int _length;
+
+	/// <summary>
+	/// Length of period.
+	/// </summary>
+	[Display(
+		ResourceType = typeof(LocalizedStrings),
+		Name = LocalizedStrings.PeriodKey,
+		Description = LocalizedStrings.IndicatorPeriodKey,
+		GroupName = LocalizedStrings.GeneralKey)]
+	public int Length
+	{
+		get => _length;
+		set
+		{
+			if (value < 1)
+				throw new ArgumentOutOfRangeException(nameof(value), value, LocalizedStrings.InvalidValue);
+
+			_length = value;
+
+			Reset();
+		}
+	}
+
+	/// <inheritdoc />
+	public override IndicatorMeasures Measure => IndicatorMeasures.MinusOnePlusOne;
+
+	/// <inheritdoc />
+	public override int NumValuesToInitialize => base.NumValuesToInitialize + Length - 1;
+
+	/// <inheritdoc />
+	protected override IIndicatorValue OnProcess(IIndicatorValue input)
+	{
+		var candle = input.ToCandle();
+
+		if (input.IsFinal)
+		{
+			_highBuffer.PushBack(candle.HighPrice);
+			_lowBuffer.PushBack(candle.LowPrice);
+		}
+
+		var result = new EhlersFisherTransformValue(this, input.Time);
+
+		if (_highBuffer.Count >= Length)
+		{
+			var maxHigh = _highBuffer.Max.Value;
+			var minLow = _lowBuffer.Min.Value;
+			var range = maxHigh - minLow;
+
+			var value = range == 0 ? 0m : 0.5m * ((candle.GetMedianPrice() - minLow) / range - 0.5m);
+
+			value = 0.66m * value + 0.67m * _prevValue;
+			value = value.Min(0.999m).Max(-0.999m);
+
+			var fisherTransform = 0.5m * (decimal)Math.Log((double)((1 + value) / (1 - value)));
+
+			result.Add(MainLine, MainLine.Process(input, fisherTransform));
+			result.Add(TriggerLine, TriggerLine.Process(input, _currValue));
+
+			if (input.IsFinal)
+			{
+				_currValue = fisherTransform;
+				_prevValue = value;
+			}
+		}
+
+		return result;
+	}
+
+	/// <inheritdoc />
+	public override void Reset()
+	{
+		_highBuffer.Capacity = Length;
+		_lowBuffer.Capacity = Length;
+		_prevValue = 0;
+		_currValue = 0;
+
+		base.Reset();
+	}
+
+	/// <inheritdoc />
+	public override void Load(SettingsStorage storage)
+	{
+		base.Load(storage);
+		Length = storage.GetValue<int>(nameof(Length));
+	}
+
+	/// <inheritdoc />
+	public override void Save(SettingsStorage storage)
+	{
+		base.Save(storage);
+		storage.SetValue(nameof(Length), Length);
+	}
+
+	/// <inheritdoc />
+	public override string ToString() => base.ToString() + " " + Length;
+
+	/// <inheritdoc />
+	protected override IEhlersFisherTransformValue CreateValue(DateTime time)
+		=> new EhlersFisherTransformValue(this, time);
+}
+
+/// <summary>
+/// Represents a single line of the Ehlers Fisher Transform indicator.
+/// </summary>
+[IndicatorHidden]
+public class EhlersFisherTransformLine : BaseIndicator
+{
+	/// <inheritdoc />
+	protected override IIndicatorValue OnProcess(IIndicatorValue input)
+	{
+		if (input.IsFinal)
+			IsFormed = true;
+
+		return input;
+	}
+}
+
+/// <summary>
+/// <see cref="EhlersFisherTransform"/> indicator value.
+/// </summary>
+public interface IEhlersFisherTransformValue : IComplexIndicatorValue
+{
+	/// <summary>
+	/// Gets the main line value.
+	/// </summary>
+	IIndicatorValue MainLineValue { get; }
+
+	/// <summary>
+	/// Gets the main line value.
+	/// </summary>
+	[Browsable(false)]
+	decimal? MainLine { get; }
+
+	/// <summary>
+	/// Gets the trigger line value.
+	/// </summary>
+	IIndicatorValue TriggerLineValue { get; }
+
+	/// <summary>
+	/// Gets the trigger line value.
+	/// </summary>
+	[Browsable(false)]
+	decimal? TriggerLine { get; }
+}
+
+/// <summary>
+/// EhlersFisherTransform indicator value implementation.
+/// </summary>
+/// <remarks>
+/// Initializes a new instance of the <see cref="EhlersFisherTransformValue"/> class.
+/// </remarks>
+/// <param name="indicator">The parent EhlersFisherTransform indicator.</param>
+/// <param name="time">Time associated with this indicator value.</param>
+public class EhlersFisherTransformValue(EhlersFisherTransform indicator, DateTime time) : ComplexIndicatorValue<EhlersFisherTransform>(indicator, time), IEhlersFisherTransformValue
+{
+	/// <inheritdoc />
+	public IIndicatorValue MainLineValue => this[TypedIndicator.MainLine];
+	/// <inheritdoc />
+	public decimal? MainLine => MainLineValue.ToNullableDecimal(TypedIndicator.Source);
+
+	/// <inheritdoc />
+	public IIndicatorValue TriggerLineValue => this[TypedIndicator.TriggerLine];
+	/// <inheritdoc />
+	public decimal? TriggerLine => TriggerLineValue.ToNullableDecimal(TypedIndicator.Source);
+
+	/// <inheritdoc />
+	public override string ToString() => $"MainLine={MainLine}, TriggerLine={TriggerLine}";
+}

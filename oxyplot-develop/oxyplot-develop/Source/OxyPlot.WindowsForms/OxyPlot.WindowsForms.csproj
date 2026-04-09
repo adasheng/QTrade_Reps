@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFrameworks>net462;net6.0-windows;net8.0-windows</TargetFrameworks>
+        <UseWindowsForms>true</UseWindowsForms>
+        <Description>OxyPlot is a plotting library for .NET. This package targets Windows Forms applications.</Description>
+        <PackageTags>plotting plot charting chart</PackageTags>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <GenerateDocumentationFile>True</GenerateDocumentationFile>
+        <SignAssembly>True</SignAssembly>
+        <AssemblyOriginatorKeyFile>OxyPlot.WindowsForms.snk</AssemblyOriginatorKeyFile>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\OxyPlot\OxyPlot.csproj" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="OxyPlot.WindowsForms.snk" />
+    </ItemGroup>
+</Project>

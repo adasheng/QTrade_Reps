@@ -1,0 +1,1316 @@
+namespace StockSharp.Algo.Storages;
+
+using System.Diagnostics;
+
+using StockSharp.Algo.Candles;
+using StockSharp.Algo.Candles.Compression;
+
+/// <summary>
+/// Extension class for storage.
+/// </summary>
+public static partial class StorageHelper
+{
+	private class RangeEnumerable<TData> : IAsyncEnumerable<TData>
+		where TData : Message, IServerTimeMessage
+	{
+		[DebuggerDisplay("From {_from} Cur {_currDate} To {_to}")]
+		private class RangeEnumerator : IAsyncEnumerator<TData>
+		{
+			private DateTime _currDate;
+			private readonly IMarketDataStorage<TData> _storage;
+			private readonly DateTime _from;
+			private readonly DateTime _to;
+			private readonly CancellationToken _cancellationToken;
+			private IAsyncEnumerator<TData> _current;
+
+			private bool _checkBounds;
+			private readonly Range<DateTime> _bounds;
+
+			public RangeEnumerator(IMarketDataStorage<TData> storage, DateTime from, DateTime to, CancellationToken cancellationToken)
+			{
+				_storage = storage;
+				_from = from;
+				_to = to;
+				_cancellationToken = cancellationToken;
+				_currDate = from.Date;
+
+				_checkBounds = true; // проверяем нижнюю границу
+				_bounds = new(_from, _to);
+			}
+
+			async ValueTask IAsyncDisposable.DisposeAsync()
+			{
+				await (_current?.DisposeAsync() ?? default);
+				_current = null;
+
+				_checkBounds = true;
+				_currDate = _from.Date;
+			}
+
+			async ValueTask<bool> IAsyncEnumerator<TData>.MoveNextAsync()
+			{
+				_current ??= _storage.LoadAsync(_currDate).GetAsyncEnumerator(_cancellationToken);
+
+				while (true)
+				{
+					if (!await _current.MoveNextAsync())
+					{
+						await _current.DisposeAsync();
+
+						var canMove = false;
+
+						while (!canMove)
+						{
+							_currDate += TimeSpan.FromDays(1);
+
+							if (_currDate > _to)
+								break;
+
+							_checkBounds = _currDate == _to.Date;
+
+							_current = _storage.LoadAsync(_currDate).GetAsyncEnumerator(_cancellationToken);
+
+							canMove = await _current.MoveNextAsync();
+						}
+
+						if (!canMove)
+							return false;
+					}
+
+					if (!_checkBounds)
+						break;
+
+					do
+					{
+						var time = Current.ServerTime;
+
+						if (_bounds.Contains(time))
+							return true;
+
+						if (time > _to)
+							return false;
+					}
+					while (await _current.MoveNextAsync());
+				}
+
+				return true;
+			}
+
+			public TData Current => _current.Current;
+		}
+
+		private readonly IMarketDataStorage<TData> _storage;
+		private readonly DateTime _from;
+		private readonly DateTime _to;
+
+		public RangeEnumerable(IMarketDataStorage<TData> storage, DateTime from, DateTime to)
+		{
+			if (from > to)
+				throw new InvalidOperationException(LocalizedStrings.StartCannotBeMoreEnd.Put(from, to));
+
+			_storage = storage ?? throw new ArgumentNullException(nameof(storage));
+			_from = from;
+			_to = to;
+		}
+
+		IAsyncEnumerator<TData> IAsyncEnumerable<TData>.GetAsyncEnumerator(CancellationToken cancellationToken)
+			=> new RangeEnumerator(_storage, _from, _to, cancellationToken);
+	}
+
+	/// <summary>
+	/// To create an iterative loader of market data for the time range.
+	/// </summary>
+	/// <typeparam name="TMessage">Data type.</typeparam>
+	/// <param name="storage">Market-data storage.</param>
+	/// <param name="from">The start time for data loading. If the value is not specified, data will be loaded from the starting time <see cref="IMarketDataStorageDrive.GetDatesAsync"/>.</param>
+	/// <param name="to">The end time for data loading. If the value is not specified, data will be loaded up to the <see cref="IMarketDataStorageDrive.GetDatesAsync"/> date, inclusive.</param>
+	/// <returns>The iterative loader of market data.</returns>
+	public static IAsyncEnumerable<TMessage> LoadAsync<TMessage>(this IMarketDataStorage<TMessage> storage, DateTime? from, DateTime? to)
+		where TMessage : Message, IServerTimeMessage
+	{
+		if (storage is null)
+			throw new ArgumentNullException(nameof(storage));
+
+		return Impl(storage, from, to);
+
+		static async IAsyncEnumerable<TMessage> Impl(IMarketDataStorage<TMessage> storage, DateTime? from, DateTime? to, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			var range = await GetRangeAsync(storage, from, to, cancellationToken);
+
+			if (range == null)
+				yield break;
+
+			var enumerable = new RangeEnumerable<TMessage>(storage, range.Min, range.Max);
+
+			await foreach (var msg in enumerable.WithEnforcedCancellation(cancellationToken))
+				yield return msg;
+		}
+	}
+
+	/// <summary>
+	/// To delete market data from the storage for the specified time period.
+	/// </summary>
+	/// <param name="storage">Market-data storage.</param>
+	/// <param name="from">The start time for data deleting. If the value is not specified, the data will be deleted starting from the date <see cref="IMarketDataStorageDrive.GetDatesAsync"/>.</param>
+	/// <param name="to">The end time, up to which the data shall be deleted. If the value is not specified, data will be deleted up to the end date <see cref="IMarketDataStorageDrive.GetDatesAsync"/>, inclusive.</param>
+	/// <param name="cancellationToken"><see cref="CancellationToken"/></param>
+	/// <returns><see langword="true"/> if data was deleted, <see langword="false"/> data not exist for the specified period.</returns>
+	public static async ValueTask<bool> DeleteAsync(this IMarketDataStorage storage, DateTime? from, DateTime? to, CancellationToken cancellationToken)
+	{
+		if (storage == null)
+			throw new ArgumentNullException(nameof(storage));
+
+		var range = await GetRangeAsync(storage, from, to, cancellationToken);
+
+		if (range == null)
+			return false;
+
+		var min = range.Min;
+		var max = range.Max.EndOfDay();
+
+		for (var time = min; time <= max; time = time.AddDays(1))
+		{
+			var date = time.Date;
+
+			if (from == null && to == null)
+			{
+				await storage.DeleteAsync(date, cancellationToken);
+				continue;
+			}
+			else if (from == null && date < to.Value.Date)
+			{
+				await storage.DeleteAsync(date, cancellationToken);
+				continue;
+			}
+			else if (to == null && date > from.Value.Date)
+			{
+				await storage.DeleteAsync(date, cancellationToken);
+				continue;
+			}
+
+			if (time == min)
+			{
+				var metaInfo = await storage.GetMetaInfoAsync(date, cancellationToken);
+
+				if (metaInfo is null)
+					continue;
+
+				if (metaInfo.FirstTime >= time && max.Date != min.Date)
+				{
+					await storage.DeleteAsync(date, cancellationToken);
+				}
+				else
+				{
+					var data = (await storage.LoadAsync(date).ToArrayAsync(cancellationToken)).ToList();
+					data.RemoveWhere(d =>
+					{
+						var t = d.GetServerTime();
+						return t < min || t > range.Max;
+					});
+					await storage.DeleteAsync(data, cancellationToken);
+				}
+			}
+			else if (date < max.Date)
+				await storage.DeleteAsync(date, cancellationToken);
+			else
+			{
+				var data = (await storage.LoadAsync(date).ToArrayAsync(cancellationToken)).ToList();
+				data.RemoveWhere(d => d.GetServerTime() > range.Max);
+				await storage.DeleteAsync(data, cancellationToken);
+			}
+		}
+
+		return true;
+	}
+
+	/// <summary>
+	/// Get available date range for the specified storage.
+	/// </summary>
+	/// <param name="storage">Storage.</param>
+	/// <param name="from">The initial date from which you need to get data.</param>
+	/// <param name="to">The final date by which you need to get data.</param>
+	/// <param name="cancellationToken"><see cref="CancellationToken"/></param>
+	/// <returns>Date range</returns>
+	public static async ValueTask<IRange<DateTime>> GetRangeAsync(this IMarketDataStorage storage, DateTime? from, DateTime? to, CancellationToken cancellationToken)
+	{
+		if (storage is null)
+			throw new ArgumentNullException(nameof(storage));
+
+		if (from > to)
+		{
+			return null;
+		}
+
+		var dates = await storage.GetDatesAsync().ToArrayAsync(cancellationToken);
+
+		if (dates.IsEmpty())
+			return null;
+
+		var first = dates.First().UtcKind();
+		var last = dates.Last().UtcKind();
+
+		if (from > last.EndOfDay() || to < first)
+			return null;
+
+		var firstInfo = await storage.GetMetaInfoAsync(first, cancellationToken);
+		var lastInfo = first == last ? firstInfo : await storage.GetMetaInfoAsync(last, cancellationToken);
+
+		if (firstInfo is null)
+		{
+			LogManager.Instance?.Application.AddWarningLog(LocalizedStrings.ElementNotFoundParams.Put(first));
+			return null;
+		}
+
+		if (lastInfo is null)
+		{
+			LogManager.Instance?.Application.AddWarningLog(LocalizedStrings.ElementNotFoundParams.Put(last));
+			return null;
+		}
+
+		first = firstInfo.FirstTime;
+		last = lastInfo.LastTime;
+
+		// chech bounds again after time part loaded
+		if (from > last || to < first)
+			return null;
+
+		var timePrecision = storage.Serializer.TimePrecision;
+		return new Range<DateTime>(first, last).Intersect(new Range<DateTime>((from ?? first).StorageTruncate(timePrecision), (to ?? last).StorageTruncate(timePrecision)));
+	}
+
+	/// <summary>
+	/// To get all dates for stored market data for the specified range.
+	/// </summary>
+	/// <param name="storage">Market-data storage.</param>
+	/// <param name="from">The range start time. If the value is not specified, data will be loaded from the start date <see cref="IMarketDataStorageDrive.GetDatesAsync"/>.</param>
+	/// <param name="to">The range end time. If the value is not specified, data will be loaded up to the end date <see cref="IMarketDataStorageDrive.GetDatesAsync"/>, inclusive.</param>
+	/// <returns>All available data within the range.</returns>
+	public static IAsyncEnumerable<DateTime> GetDatesAsync(this IMarketDataStorage storage, DateTime? from, DateTime? to)
+	{
+		return Impl();
+
+		async IAsyncEnumerable<DateTime> Impl([EnumeratorCancellation]CancellationToken cancellationToken = default)
+		{
+			var dates = storage.GetDatesAsync();
+
+			if (from != null)
+				dates = dates.Where(d => d >= from.Value);
+
+			if (to != null)
+				dates = dates.Where(d => d <= to.Value);
+
+			await foreach (var date in dates.WithEnforcedCancellation(cancellationToken))
+				yield return date;
+		}
+	}
+
+	internal static DateTime StorageTruncate(this DateTime time, TimeSpan precision)
+	{
+		var ticks = precision.Ticks;
+
+		return ticks == 1 ? time : time.Truncate(ticks);
+	}
+
+	internal static DateTime StorageBinaryOldTruncate(this DateTime time)
+	{
+		return time.StorageTruncate(TimeSpan.FromMilliseconds(1));
+	}
+
+	/// <summary>
+	/// Delete instrument by identifier.
+	/// </summary>
+	/// <param name="securityStorage">Securities meta info storage.</param>
+	/// <param name="securityId">Identifier.</param>
+	/// <param name="cancellationToken"><see cref="CancellationToken"/></param>
+	public static ValueTask DeleteByIdAsync(this ISecurityStorage securityStorage, string securityId, CancellationToken cancellationToken)
+	{
+		return securityStorage.DeleteByIdAsync(securityId.ToSecurityId(), cancellationToken);
+	}
+
+	/// <summary>
+	/// Delete instrument by identifier.
+	/// </summary>
+	/// <param name="securityStorage">Securities meta info storage.</param>
+	/// <param name="securityId">Identifier.</param>
+	/// <param name="cancellationToken"><see cref="CancellationToken"/></param>
+	public static ValueTask DeleteByIdAsync(this ISecurityStorage securityStorage, SecurityId securityId, CancellationToken cancellationToken)
+	{
+		if (securityStorage == null)
+			throw new ArgumentNullException(nameof(securityStorage));
+
+		if (securityId == default)
+			throw new ArgumentNullException(nameof(securityId));
+
+		return securityStorage.DeleteByAsync(new SecurityLookupMessage { SecurityId = securityId }, cancellationToken);
+	}
+
+	private class CandleMessageBuildableStorage : IMarketDataStorage<CandleMessage>
+	{
+		private readonly IMarketDataStorage<CandleMessage> _original;
+		private readonly Func<TimeSpan, IMarketDataStorage<CandleMessage>> _getStorage;
+		private readonly Dictionary<TimeSpan, BiggerTimeFrameCandleCompressor> _compressors;
+		private readonly TimeSpan _timeFrame;
+		private readonly IEnumerable<TimeSpan> _smallerTimeFrames;
+		private DateTime _prevDate;
+
+		public CandleMessageBuildableStorage(CandleBuilderProvider provider, SecurityId securityId, TimeSpan timeFrame, IMarketDataDrive drive, StorageFormats format, Func<TimeSpan, IMarketDataStorage<CandleMessage>> getStorage, IEnumerable<TimeSpan> smallerTimeFrames)
+		{
+			_getStorage = getStorage ?? throw new ArgumentNullException(nameof(getStorage));
+			_smallerTimeFrames = smallerTimeFrames ?? throw new ArgumentNullException(nameof(smallerTimeFrames));
+
+			_dataType = DataType.Create<TimeFrameCandleMessage>(timeFrame);
+			_original = _getStorage(timeFrame);
+			_timeFrame = timeFrame;
+
+			var origin = _timeFrame.TimeFrame();
+
+			_compressors = smallerTimeFrames.ToDictionary(tf => tf, tf => new BiggerTimeFrameCandleCompressor(new MarketDataMessage
+			{
+				SecurityId = securityId,
+				DataType2 = origin,
+				IsSubscribe = true,
+			}, provider.Get(typeof(TimeFrameCandleMessage)), tf.TimeFrame()));
+		}
+
+		private IEnumerable<IMarketDataStorage<CandleMessage>> GetStorages()
+			=> new[] { _original }.Concat(_smallerTimeFrames.Select(_getStorage));
+
+		IAsyncEnumerable<DateTime> IMarketDataStorage.GetDatesAsync()
+		{
+			return Impl();
+
+			async IAsyncEnumerable<DateTime> Impl([EnumeratorCancellation]CancellationToken cancellationToken = default)
+			{
+				var dates = new HashSet<DateTime>();
+
+				foreach (var storage in GetStorages())
+				{
+					var storageDates = storage.GetDatesAsync();
+
+					await foreach(var date in storageDates.WithEnforcedCancellation(cancellationToken))
+						dates.Add(date);
+				}
+
+				foreach (var date in dates.OrderBy())
+					yield return date;
+			}
+		}
+
+		private readonly DataType _dataType;
+		DataType IMarketDataStorage.DataType => _dataType;
+
+		SecurityId IMarketDataStorage.SecurityId => _original.SecurityId;
+
+		IMarketDataStorageDrive IMarketDataStorage.Drive => _original.Drive;
+
+		bool IMarketDataStorage.AppendOnlyNew
+		{
+			get => _original.AppendOnlyNew;
+			set => _original.AppendOnlyNew = value;
+		}
+
+		ValueTask<int> IMarketDataStorage.SaveAsync(IEnumerable<Message> data, CancellationToken cancellationToken) => ((IMarketDataStorage<CandleMessage>)this).SaveAsync(data.Cast<CandleMessage>(), cancellationToken);
+
+		ValueTask IMarketDataStorage.DeleteAsync(IEnumerable<Message> data, CancellationToken cancellationToken) => ((IMarketDataStorage<CandleMessage>)this).DeleteAsync(data.Cast<CandleMessage>(), cancellationToken);
+
+		ValueTask IMarketDataStorage.DeleteAsync(DateTime date, CancellationToken cancellationToken) => _original.DeleteAsync(date, cancellationToken);
+
+		IAsyncEnumerable<Message> IMarketDataStorage.LoadAsync(DateTime date) => ((IMarketDataStorage<CandleMessage>)this).LoadAsync(date);
+
+		async ValueTask<IMarketDataMetaInfo> IMarketDataStorage.GetMetaInfoAsync(DateTime date, CancellationToken cancellationToken)
+		{
+			foreach (var storage in GetStorages())
+			{
+				var info = await storage.GetMetaInfoAsync(date, cancellationToken);
+
+				if (info != null)
+					return new BuildableCandleInfo(info, _timeFrame);
+			}
+
+			return null;
+		}
+
+		IMarketDataSerializer IMarketDataStorage.Serializer => ((IMarketDataStorage<CandleMessage>)this).Serializer;
+
+		private DateTime _nextCandleMinTime;
+
+		public IAsyncEnumerable<CandleMessage> LoadAsync(DateTime date)
+		{
+			return Impl(this, date);
+
+			static async IAsyncEnumerable<CandleMessage> Impl(CandleMessageBuildableStorage storage, DateTime date, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+			{
+				if (date <= storage._prevDate)
+				{
+					storage._compressors.Values.ForEach(c => c.Reset());
+					storage._nextCandleMinTime = DateTime.MinValue;
+				}
+
+				storage._prevDate = date;
+
+				var storagesWithData = new List<(IMarketDataStorage<CandleMessage> s, IEnumerable<CandleMessage> data)>();
+
+				foreach (var s in storage.GetStorages())
+				{
+					var dates = await s.GetDatesAsync().ToArrayAsync(cancellationToken);
+
+					if (dates.Contains(date))
+					{
+						var data = await s.LoadAsync(date).ToArrayAsync(cancellationToken);
+						storagesWithData.Add((s, data));
+					}
+				}
+
+				var enumerators = storagesWithData.Select(pair =>
+				{
+					var (s, data) = pair;
+
+					if (s == storage._original)
+						return data;
+
+					var compressor = storage._compressors.TryGetValue(s.DataType.GetTimeFrame());
+
+					if (compressor == null)
+						return [];
+
+					return data.SelectMany(message => compressor.Process(message));
+				}).Select(e => e.GetEnumerator()).ToList();
+
+				if (enumerators.Count == 0)
+					yield break;
+
+				var tf = storage._dataType.GetTimeFrame();
+				var toRemove = new List<IEnumerator<CandleMessage>>(enumerators.Count);
+
+				while (true)
+				{
+					foreach (var enumerator in enumerators)
+					{
+						while (true)
+						{
+							if (!enumerator.MoveNext())
+							{
+								toRemove.Add(enumerator);
+								break;
+							}
+							else if (enumerator.Current.OpenTime >= storage._nextCandleMinTime)
+								break;
+						}
+					}
+
+					toRemove.ForEach(e =>
+					{
+						e.Dispose();
+						enumerators.Remove(e);
+					});
+
+					toRemove.Clear();
+
+					if (enumerators.Count == 0)
+						yield break;
+
+					var nextCandleCompressor = enumerators.OrderBy(e => e.Current.OpenTime).First();
+					var candle = nextCandleCompressor.Current;
+
+					while ((candle.OpenTime < storage._nextCandleMinTime || candle.State != CandleStates.Finished) && nextCandleCompressor.MoveNext())
+					{
+						/* compress until candle is finished OR no more data */
+						candle = nextCandleCompressor.Current;
+					}
+
+					if (candle.State != CandleStates.Finished)
+					{
+						candle = candle.TypedClone();
+						candle.State = CandleStates.Finished;
+					}
+
+					storage._nextCandleMinTime = candle.OpenTime + tf;
+					yield return candle;
+				}
+			}
+		}
+
+		IMarketDataSerializer<CandleMessage> IMarketDataStorage<CandleMessage>.Serializer => _original.Serializer;
+
+		public ValueTask<int> SaveAsync(IEnumerable<CandleMessage> data, CancellationToken cancellationToken) => _original.SaveAsync(data, cancellationToken);
+
+		public ValueTask DeleteAsync(IEnumerable<CandleMessage> data, CancellationToken cancellationToken) => _original.DeleteAsync(data, cancellationToken);
+
+		private class BuildableCandleInfo(IMarketDataMetaInfo info, TimeSpan tf) : IMarketDataMetaInfo
+		{
+			private readonly IMarketDataMetaInfo _info = info ?? throw new ArgumentNullException(nameof(info));
+
+			public DateTime Date              => _info.Date;
+			public bool IsOverride            => _info.IsOverride;
+
+			public int Count             { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+			public object LastId         { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+			public decimal PriceStep     { get => _info.PriceStep;  set => throw new NotSupportedException(); }
+			public decimal VolumeStep    { get => _info.VolumeStep; set => throw new NotSupportedException(); }
+
+			public DateTime FirstTime
+			{
+				get => tf.GetCandleBounds(_info.FirstTime).Min;
+				set => throw new NotSupportedException();
+			}
+
+			public DateTime LastTime
+			{
+				get => tf.GetCandleBounds(_info.LastTime).Max;
+				set => throw new NotSupportedException();
+			}
+
+			public void Write(Stream stream)
+				=> throw new NotSupportedException();
+
+			public ValueTask ReadAsync(Stream stream, CancellationToken cancellationToken)
+				=> throw new NotSupportedException();
+		}
+	}
+
+	/// <summary>
+	/// To get the candles storage for the specified instrument. The storage will build candles from smaller time-frames if original time-frames is not exist.
+	/// </summary>
+	/// <param name="provider">Candle builders provider.</param>
+	/// <param name="registry">Market-data storage.</param>
+	/// <param name="securityId">Security ID.</param>
+	/// <param name="timeFrame">Time-frame.</param>
+	/// <param name="drive">The storage. If a value is <see langword="null" />, <see cref="IStorageRegistry.DefaultDrive"/> will be used.</param>
+	/// <param name="format">The format type. By default <see cref="StorageFormats.Binary"/> is passed.</param>
+	/// <param name="cancellationToken"><see cref="CancellationToken"/></param>
+	/// <returns>The candles storage.</returns>
+	public static async ValueTask<IMarketDataStorage<CandleMessage>> GetCandleMessageBuildableStorage(this CandleBuilderProvider provider, IStorageRegistry registry, SecurityId securityId, TimeSpan timeFrame, IMarketDataDrive drive = null, StorageFormats format = StorageFormats.Binary, CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(registry);
+
+		async ValueTask<IEnumerable<TimeSpan>> smallerTimeFrames()
+		{
+			return (await (drive ?? registry.DefaultDrive)
+				.GetAvailableDataTypesAsync(securityId, format)
+				.ToArrayAsync(cancellationToken))
+				.FilterTimeFrames()
+				.FilterSmallerTimeFrames(timeFrame)
+				.OrderByDescending();
+		}
+
+		return new CandleMessageBuildableStorage(provider, securityId,
+			timeFrame, drive, format,
+			tf => registry.GetTimeFrameCandleMessageStorage(securityId, tf, drive, format),
+			await smallerTimeFrames());
+	}
+
+	/// <summary>
+	/// The delimiter, replacing '/' in path for instruments with id like USD/EUR. Is equal to '__'.
+	/// </summary>
+	public const string SecuritySlashSeparator = "__";
+
+	/// <summary>
+	/// The delimiter, replacing '*' in the path for instruments with id like C.BPO-*@CANADIAN. Is equal to '##STAR##'.
+	/// </summary>
+	public const string SecurityStarSeparator = "##STAR##";
+	// http://stocksharp.com/forum/yaf_postst4637_API-4-2-2-18--System-ArgumentException--Illegal-characters-in-path.aspx
+
+	/// <summary>
+	/// The delimiter, replacing ':' in the path for instruments with id like AA-CA:SPB@SPBEX. Is equal to '##COLON##'.
+	/// </summary>
+	public const string SecurityColonSeparator = "##COLON##";
+
+	/// <summary>
+	/// The delimiter, replacing '|' in the path for instruments with id like AA-CA|SPB@SPBEX. Is equal to '##VBAR##'.
+	/// </summary>
+	public const string SecurityVerticalBarSeparator = "##VBAR##";
+
+	/// <summary>
+	/// The delimiter, replacing '?' in the path for instruments with id like AA-CA?SPB@SPBEX. Is equal to '##QSTN##'.
+	/// </summary>
+	public const string SecurityQuestionSeparator = "##QSTN##";
+
+	/// <summary>
+	/// The delimiter, replacing first '.' in the path for instruments with id like .AA-CA@SPBEX. Is equal to '##DOT##'.
+	/// </summary>
+	public const string SecurityFirstDot = "##DOT##";
+
+	///// <summary>
+	///// The delimiter, replacing first '..' in the path for instruments with id like ..AA-CA@SPBEX. Is equal to '##DDOT##'.
+	///// </summary>
+	//public const string SecurityFirst2Dots = "##DDOT##";
+
+	/// <summary>
+	/// The delimiter, replacing '\\' in path for instruments with id like USD\\EUR. Is equal to '##BS##'.
+	/// </summary>
+	public const string SecurityBackslashSeparator = "##BS##";
+
+	private static readonly CachedSynchronizedDictionary<string, string> _securitySeparators = new()
+	{
+		{ "/", SecuritySlashSeparator },
+		{ "*", SecurityStarSeparator },
+		{ ":", SecurityColonSeparator },
+		{ "|", SecurityVerticalBarSeparator },
+		{ "?", SecurityQuestionSeparator },
+		{ "\\", SecurityBackslashSeparator },
+	};
+
+	// http://stackoverflow.com/questions/62771/how-check-if-given-string-is-legal-allowed-file-name-under-windows
+	private static readonly string[] _reservedDos =
+	[
+		"CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+	];
+
+	/// <summary>
+	/// To convert the instrument identifier into the folder name, replacing reserved symbols.
+	/// </summary>
+	/// <param name="id">Security ID.</param>
+	/// <returns>Directory name.</returns>
+	public static string SecurityIdToFolderName(this string id)
+	{
+		if (id.IsEmpty())
+			throw new ArgumentNullException(nameof(id));
+
+		var folderName = id;
+
+		if (_reservedDos.Any(d => folderName.StartsWithIgnoreCase(d)))
+			folderName = "_" + folderName;
+
+		if (folderName.StartsWithIgnoreCase("."))
+			folderName = SecurityFirstDot + folderName.Remove(0, 1);
+
+		return _securitySeparators
+			.CachedPairs
+			.Aggregate(folderName, (current, pair) => current.Replace(pair.Key, pair.Value));
+	}
+
+	/// <summary>
+	/// The inverse conversion from the <see cref="SecurityIdToFolderName"/> method.
+	/// </summary>
+	/// <param name="folderName">Directory name.</param>
+	/// <returns>Security ID.</returns>
+	public static string FolderNameToSecurityId(this string folderName)
+	{
+		if (folderName.IsEmpty())
+			throw new ArgumentNullException(nameof(folderName));
+
+		var id = folderName.ToUpperInvariant();
+
+		if (id[0] == '_' && _reservedDos.Any(d => id.StartsWithIgnoreCase("_" + d)))
+			id = id[1..];
+
+		if (id.StartsWithIgnoreCase(SecurityFirstDot))
+			id = id.ReplaceIgnoreCase(SecurityFirstDot, ".");
+
+		return _securitySeparators
+			.CachedPairs
+			.Aggregate(id, (current, pair) => current.ReplaceIgnoreCase(pair.Value, pair.Key));
+	}
+
+	/// <summary>
+	/// Load history messages from storage as async stream.
+	/// </summary>
+	/// <param name="settings">Storage settings.</param>
+	/// <param name="candleBuilderProvider">Candle builders provider.</param>
+	/// <param name="subscription">Market-data message (uses as a subscribe/unsubscribe in outgoing case, confirmation event in incoming case).</param>
+	/// <param name="context">Context that will be populated with load result metadata after enumeration.</param>
+	/// <param name="cancellationToken">Cancellation token.</param>
+	/// <returns>Async stream of messages.</returns>
+	public static async IAsyncEnumerable<Message> LoadMessagesAsync(
+		this StorageCoreSettings settings,
+		CandleBuilderProvider candleBuilderProvider,
+		MarketDataMessage subscription,
+		StorageLoadContext context,
+		[EnumeratorCancellation] CancellationToken cancellationToken = default)
+	{
+		if (settings is null)
+			throw new ArgumentNullException(nameof(settings));
+
+		if (candleBuilderProvider is null)
+			throw new ArgumentNullException(nameof(candleBuilderProvider));
+
+		if (subscription is null)
+			throw new ArgumentNullException(nameof(subscription));
+
+		if (context is null)
+			throw new ArgumentNullException(nameof(context));
+
+		if (subscription.From == null)
+			yield break;
+
+		IMarketDataStorage<TMessage> GetStorage<TMessage>(SecurityId securityId, DataType dt)
+			where TMessage : Message
+		{
+			return (IMarketDataStorage<TMessage>)settings.GetStorage(securityId, dt);
+		}
+
+		var secId = subscription.SecurityId;
+		var transactionId = subscription.TransactionId;
+
+		async IAsyncEnumerable<Message> LoadFromStorage<TMessage>(IMarketDataStorage<TMessage> storage, Func<TMessage, bool> filter = null)
+			where TMessage : Message, ISubscriptionIdMessage, IServerTimeMessage
+		{
+			var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+			if (range == default)
+				yield break;
+
+			var messages = storage.LoadAsync(range.from, range.to);
+
+			if (subscription.Skip != default)
+				messages = messages.Skip((int)subscription.Skip.Value);
+
+			await foreach (var msg in LoadMessagesAsyncCore(messages, subscription.Count, transactionId, filter, context, cancellationToken))
+				yield return msg;
+		}
+
+		async IAsyncEnumerable<Message> LoadFromEnumerable<TMessage>(IAsyncEnumerable<TMessage> messages, Func<TMessage, bool> filter = null)
+			where TMessage : Message, ISubscriptionIdMessage, IServerTimeMessage
+		{
+			await foreach (var msg in LoadMessagesAsyncCore(messages, subscription.Count, transactionId, filter, context, cancellationToken))
+				yield return msg;
+		}
+
+		if (subscription.DataType2 == DataType.Level1)
+		{
+			if (subscription.BuildMode != MarketDataBuildModes.Build)
+			{
+				if (settings.IsMode(StorageModes.Incremental))
+				{
+					await foreach (var msg in LoadFromStorage(GetStorage<Level1ChangeMessage>(secId, subscription.DataType2)).WithCancellation(cancellationToken))
+						yield return msg;
+				}
+			}
+			else
+			{
+				if (subscription.BuildFrom == DataType.OrderLog)
+				{
+					var storage = GetStorage<ExecutionMessage>(secId, subscription.BuildFrom);
+
+					var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+					if (range != default)
+					{
+						await foreach (var msg in LoadFromEnumerable(storage
+							.LoadAsync(range.from, range.to)
+							.ToLevel1(subscription.DepthBuilder, subscription.RefreshSpeed ?? default)).WithCancellation(cancellationToken))
+							yield return msg;
+					}
+				}
+				else if (subscription.BuildFrom == DataType.MarketDepth)
+				{
+					var storage = GetStorage<QuoteChangeMessage>(secId, subscription.BuildFrom);
+
+					var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+					if (range != default)
+					{
+						await foreach (var msg in LoadFromEnumerable(storage
+							.LoadAsync(range.from, range.to)
+							.ToLevel1()).WithCancellation(cancellationToken))
+							yield return msg;
+					}
+				}
+			}
+		}
+		else if (subscription.DataType2 == DataType.MarketDepth)
+		{
+			if (subscription.BuildMode != MarketDataBuildModes.Build)
+			{
+				if (settings.IsMode(StorageModes.Incremental))
+				{
+					await foreach (var msg in LoadFromStorage(GetStorage<QuoteChangeMessage>(secId, subscription.DataType2)).WithCancellation(cancellationToken))
+						yield return msg;
+				}
+			}
+			else
+			{
+				if (subscription.BuildFrom == DataType.OrderLog)
+				{
+					var storage = GetStorage<ExecutionMessage>(secId, subscription.BuildFrom);
+
+					var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+					if (range != default)
+					{
+						await foreach (var msg in LoadFromEnumerable(storage
+							.LoadAsync(range.from, range.to)
+							.ToOrderBooks(subscription.DepthBuilder, subscription.RefreshSpeed ?? default, subscription.MaxDepth ?? int.MaxValue)
+							.BuildIfNeed()).WithCancellation(cancellationToken))
+							yield return msg;
+					}
+				}
+				else if (subscription.BuildFrom == DataType.Level1)
+				{
+					var storage = GetStorage<Level1ChangeMessage>(secId, subscription.BuildFrom);
+
+					var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+					if (range != default)
+					{
+						await foreach (var msg in LoadFromEnumerable(storage
+							.LoadAsync(range.from, range.to)
+							.ToOrderBooks()).WithCancellation(cancellationToken))
+							yield return msg;
+					}
+				}
+			}
+		}
+		else if (subscription.DataType2 == DataType.Ticks)
+		{
+			if (subscription.BuildMode != MarketDataBuildModes.Build)
+			{
+				await foreach (var msg in LoadFromStorage(GetStorage<ExecutionMessage>(secId, subscription.DataType2)).WithCancellation(cancellationToken))
+					yield return msg;
+			}
+			else
+			{
+				if (subscription.BuildFrom == DataType.OrderLog)
+				{
+					var storage = GetStorage<ExecutionMessage>(secId, subscription.BuildFrom);
+
+					var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+					if (range != default)
+					{
+						await foreach (var msg in LoadFromEnumerable(storage
+							.LoadAsync(range.from, range.to)
+							.ToTicks()).WithCancellation(cancellationToken))
+							yield return msg;
+					}
+				}
+				else if (subscription.BuildFrom == DataType.Level1)
+				{
+					var storage = GetStorage<Level1ChangeMessage>(secId, subscription.BuildFrom);
+
+					var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+					if (range != default)
+					{
+						await foreach (var msg in LoadFromEnumerable(storage
+							.LoadAsync(range.from, range.to)
+							.ToTicks()).WithCancellation(cancellationToken))
+							yield return msg;
+					}
+				}
+			}
+		}
+		else if (subscription.DataType2 == DataType.OrderLog)
+		{
+			await foreach (var msg in LoadFromStorage(GetStorage<ExecutionMessage>(secId, subscription.DataType2)).WithCancellation(cancellationToken))
+				yield return msg;
+		}
+		else if (subscription.DataType2 == DataType.News)
+		{
+			await foreach (var msg in LoadFromStorage(GetStorage<NewsMessage>(default, subscription.DataType2)).WithCancellation(cancellationToken))
+				yield return msg;
+		}
+		else if (subscription.DataType2 == DataType.BoardState)
+		{
+			await foreach (var msg in LoadFromStorage(GetStorage<BoardStateMessage>(default, subscription.DataType2)).WithCancellation(cancellationToken))
+				yield return msg;
+		}
+		else if (subscription.DataType2.IsCandles)
+		{
+			async IAsyncEnumerable<Message> TryBuildCandlesAsync(MarketDataMessage subscription)
+			{
+				if (subscription.Count <= 0)
+					yield break;
+
+				IMarketDataStorage storage;
+
+				var buildFrom = subscription.BuildFrom;
+
+				if (buildFrom == null || buildFrom == DataType.Ticks)
+					storage = GetStorage<ExecutionMessage>(secId, DataType.Ticks);
+				else if (buildFrom == DataType.OrderLog)
+					storage = GetStorage<ExecutionMessage>(secId, buildFrom);
+				else if (buildFrom == DataType.Level1)
+					storage = GetStorage<Level1ChangeMessage>(secId, buildFrom);
+				else if (buildFrom == DataType.MarketDepth)
+					storage = GetStorage<QuoteChangeMessage>(secId, buildFrom);
+				else
+					throw new ArgumentOutOfRangeException(nameof(subscription), buildFrom, LocalizedStrings.InvalidValue);
+
+				var range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+				if (range != default && buildFrom == null)
+					buildFrom = DataType.Ticks;
+				else if (range == default && buildFrom == null)
+				{
+					storage = GetStorage<Level1ChangeMessage>(secId, DataType.Level1);
+					range = await GetRangeAsync(storage, subscription, cancellationToken);
+
+					if (range != default)
+						buildFrom = DataType.Level1;
+				}
+
+				if (range == default)
+					yield break;
+
+				var from = range.from;
+				var to = range.to;
+
+				var count = subscription.Count;
+				var transId = subscription.TransactionId;
+
+				var mdMsg = subscription.TypedClone();
+				mdMsg.From = mdMsg.To = null;
+
+				if (buildFrom == DataType.Ticks)
+				{
+					await foreach (var msg in LoadFromEnumerable(((IMarketDataStorage<ExecutionMessage>)storage)
+							.LoadAsync(from, to)
+							.ToCandles(mdMsg, candleBuilderProvider: candleBuilderProvider)).WithCancellation(cancellationToken))
+						yield return msg;
+				}
+				else if (buildFrom == DataType.OrderLog)
+				{
+					switch (subscription.BuildField)
+					{
+						case null:
+						case Level1Fields.LastTradePrice:
+							await foreach (var msg in LoadFromEnumerable(((IMarketDataStorage<ExecutionMessage>)storage)
+									.LoadAsync(from, to)
+									.ToCandles(mdMsg, candleBuilderProvider: candleBuilderProvider)).WithCancellation(cancellationToken))
+								yield return msg;
+							break;
+
+						// TODO
+						//case Level1Fields.SpreadMiddle:
+						//	lastTime = LoadMessages(((IMarketDataStorage<ExecutionMessage>)storage)
+						//	    .Load(from, to)
+						//		.ToOrderBooks(OrderLogBuilders.Plaza2.CreateBuilder(security.ToSecurityId()))
+						//	    .ToCandles(mdMsg, false, exchangeInfoProvider: exchangeInfoProvider), transId, SendReply, SendOut);
+						//	break;
+					}
+				}
+				else if (buildFrom == DataType.Level1)
+				{
+					switch (subscription.BuildField)
+					{
+						case null:
+						case Level1Fields.LastTradePrice:
+							await foreach (var msg in LoadFromEnumerable(((IMarketDataStorage<Level1ChangeMessage>)storage)
+									.LoadAsync(from, to)
+									.ToTicks()
+									.ToCandles(mdMsg, candleBuilderProvider: candleBuilderProvider)).WithCancellation(cancellationToken))
+								yield return msg;
+							break;
+
+						case Level1Fields.BestBidPrice:
+						case Level1Fields.BestAskPrice:
+						case Level1Fields.SpreadMiddle:
+							await foreach (var msg in LoadFromEnumerable(((IMarketDataStorage<Level1ChangeMessage>)storage)
+									.LoadAsync(from, to)
+									.ToOrderBooks()
+									.ToCandles(mdMsg, subscription.BuildField.Value, candleBuilderProvider: candleBuilderProvider)).WithCancellation(cancellationToken))
+								yield return msg;
+							break;
+					}
+				}
+				else if (buildFrom == DataType.MarketDepth)
+				{
+					await foreach (var msg in LoadFromEnumerable(((IMarketDataStorage<QuoteChangeMessage>)storage)
+							.LoadAsync(from, to)
+							.ToCandles(mdMsg, subscription.BuildField ?? Level1Fields.SpreadMiddle, candleBuilderProvider: candleBuilderProvider)).WithCancellation(cancellationToken))
+						yield return msg;
+				}
+				else
+					throw new ArgumentOutOfRangeException(nameof(subscription), subscription.BuildFrom, LocalizedStrings.InvalidValue);
+			}
+
+			if (subscription.BuildMode == MarketDataBuildModes.Build)
+			{
+				await foreach (var msg in TryBuildCandlesAsync(subscription).WithCancellation(cancellationToken))
+					yield return msg;
+			}
+			else
+			{
+				IMarketDataStorage<CandleMessage> storage;
+
+				if (subscription.DataType2.IsTFCandles)
+				{
+					var tf = subscription.GetTimeFrame();
+
+					ValueTask<IMarketDataStorage<CandleMessage>> GetTimeFrameCandleMessageStorage(SecurityId securityId, TimeSpan timeFrame, bool allowBuildFromSmallerTimeFrame)
+					{
+						if (!allowBuildFromSmallerTimeFrame)
+							return new((IMarketDataStorage<CandleMessage>)settings.GetStorage(securityId, timeFrame.TimeFrame()));
+
+						return candleBuilderProvider.GetCandleMessageBuildableStorage(settings.StorageRegistry, securityId, timeFrame, settings.Drive, settings.Format, cancellationToken);
+					}
+
+					storage = await GetTimeFrameCandleMessageStorage(secId, tf, subscription.AllowBuildFromSmallerTimeFrame);
+				}
+				else
+				{
+					storage = (IMarketDataStorage<CandleMessage>)settings.GetStorage(secId, subscription.DataType2);
+				}
+
+				var filter = subscription.IsCalcVolumeProfile
+					? (Func<CandleMessage, bool>)(c => c.PriceLevels != null)
+					: null;
+
+				await foreach (var msg in LoadFromStorage(storage, filter).WithCancellation(cancellationToken))
+					yield return msg;
+
+				if (subscription.BuildMode == MarketDataBuildModes.LoadAndBuild && (!context.HasData || context.LastDate < subscription.To))
+				{
+					var buildSubscription = subscription;
+
+					if (context.HasData)
+					{
+						buildSubscription = buildSubscription.TypedClone();
+						buildSubscription.From = context.LastDate;
+						buildSubscription.Count = context.Left;
+					}
+
+					await foreach (var msg in TryBuildCandlesAsync(buildSubscription).WithCancellation(cancellationToken))
+						yield return msg;
+				}
+			}
+		}
+	}
+
+	private static async ValueTask<(DateTime from, DateTime to)> GetRangeAsync(IMarketDataStorage storage, ISubscriptionMessage subscription, CancellationToken cancellationToken)
+	{
+		if (storage is null)
+			throw new ArgumentNullException(nameof(storage));
+
+		if (subscription is null)
+			throw new ArgumentNullException(nameof(subscription));
+
+		if (subscription.From is not DateTime from)
+			return default;
+
+		var dates = await storage.GetDatesAsync().ToArrayAsync(cancellationToken);
+		var last = dates.LastOr();
+
+		if (last == null)
+			return default;
+
+		var to = subscription.To ?? last.Value.EndOfDay();
+
+		var first = dates.First();
+
+		if (from < first)
+			from = first;
+
+		if (from >= to)
+			return default;
+
+		return (from, to);
+	}
+
+	private static async IAsyncEnumerable<Message> LoadMessagesAsyncCore<TMessage>(
+		IAsyncEnumerable<TMessage> messages,
+		long? count,
+		long transactionId,
+		Func<TMessage, bool> filter,
+		StorageLoadContext context,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+		where TMessage : Message, ISubscriptionIdMessage, IServerTimeMessage
+	{
+		if (messages == null)
+			throw new ArgumentNullException(nameof(messages));
+
+		if (count <= 0)
+			yield break;
+
+		if (filter != null)
+			messages = messages.Where(filter);
+
+		var left = count ?? long.MaxValue;
+
+		DateTime? lastTime = null;
+
+		try
+		{
+			await foreach (var message in messages.WithEnforcedCancellation(cancellationToken))
+			{
+				if (lastTime is null)
+				{
+					yield return new SubscriptionResponseMessage { OriginalTransactionId = transactionId };
+					lastTime = message.ServerTime;
+				}
+				else if (message.ServerTime < lastTime)
+					continue;
+
+				message.OriginalTransactionId = transactionId;
+				message.SetSubscriptionIds(subscriptionId: transactionId);
+				message.OfflineMode = MessageOfflineModes.Ignore;
+
+				lastTime = message.ServerTime;
+
+				yield return message;
+
+				if (--left <= 0)
+					break;
+			}
+		}
+		finally
+		{
+			context.Update(lastTime, count is null ? null : left);
+		}
+	}
+
+	internal static (int messageType, long arg1, decimal arg2, int arg3) Extract(this DataType dataType)
+	{
+		if (dataType is null)
+			throw new ArgumentNullException(nameof(dataType));
+
+		var messageType = (int)dataType.MessageType.ToMessageType();
+
+		var arg1 = 0L;
+		var arg2 = 0M;
+		var arg3 = 0;
+
+#pragma warning disable CS0618 // Type or member is obsolete
+		if (dataType.Arg is ExecutionTypes execType)
+			arg1 = (int)execType;
+#pragma warning restore CS0618 // Type or member is obsolete
+		else if (dataType.Arg is TimeSpan tf)
+			arg1 = tf.Ticks;
+		else if (dataType.Arg is Unit unit)
+		{
+			arg1 = (int)unit.Type;
+			arg2 = unit.Value;
+		}
+		else if (dataType.Arg is int i)
+			arg1 = i;
+		else if (dataType.Arg is long l)
+			arg1 = l;
+		else if (dataType.Arg is decimal d)
+			arg2 = d;
+		else if (dataType.Arg is PnFArg pnf)
+		{
+			arg1 = (int)pnf.BoxSize.Type;
+			arg2 = pnf.BoxSize.Value;
+			arg3 = pnf.ReversalAmount;
+		}
+		else
+			throw new ArgumentOutOfRangeException(nameof(dataType), dataType, LocalizedStrings.InvalidValue);
+
+		return (messageType, arg1, arg2, arg3);
+	}
+
+	internal static DataType ToDataType(this int messageType, long arg1, decimal arg2, int arg3)
+	{
+		var type = ((MessageTypes)messageType).ToMessageType();
+
+		object arg;
+
+		if (type == typeof(ExecutionMessage))
+#pragma warning disable CS0618 // Type or member is obsolete
+			arg = (ExecutionTypes)arg1;
+#pragma warning restore CS0618 // Type or member is obsolete
+		else if (type.IsCandleMessage())
+		{
+			var argType = type.CreateInstance<CandleMessage>().ArgType;
+
+			if (argType.Is<TimeSpan>())
+				arg = arg1.To<TimeSpan>();
+			else if (argType.Is<Unit>())
+				arg = new Unit(arg2, (UnitTypes)arg1);
+			else if (argType.Is<int>())
+				arg = (int)arg1;
+			else if (argType.Is<long>())
+				arg = arg1;
+			else if (argType.Is<decimal>())
+				arg = arg2;
+			else if (argType.Is<PnFArg>())
+			{
+				arg = new PnFArg
+				{
+					BoxSize = new Unit(arg2, (UnitTypes)arg1),
+					ReversalAmount = arg3,
+				};
+			}
+			else
+				throw new ArgumentOutOfRangeException(nameof(messageType), argType, LocalizedStrings.InvalidValue);
+		}
+		else
+			throw new ArgumentOutOfRangeException(nameof(messageType), type, LocalizedStrings.InvalidValue);
+
+		return DataType.Create(type, arg);
+	}
+
+	/// <summary>
+	/// Make association with adapter.
+	/// </summary>
+	/// <param name="provider">Message adapter's provider interface.</param>
+	/// <param name="key">Key.</param>
+	/// <param name="adapter">Adapter.</param>
+	/// <returns><see langword="true"/> if the association is successfully changed, otherwise, <see langword="false"/>.</returns>
+	public static bool SetAdapter<TKey>(this IMappingMessageAdapterProvider<TKey> provider, TKey key, IMessageAdapter adapter)
+	{
+		if (provider is null)
+			throw new ArgumentNullException(nameof(provider));
+
+		if (adapter is null)
+			throw new ArgumentNullException(nameof(adapter));
+
+		return provider.SetAdapter(key, adapter.Id);
+	}
+
+	/// <summary>
+	/// To get the candles storage for the specified instrument.
+	/// </summary>
+	/// <param name="registry"><see cref="IStorageRegistry"/>.</param>
+	/// <param name="securityId">Security ID.</param>
+	/// <param name="arg">Candle arg.</param>
+	/// <param name="drive">The storage.</param>
+	/// <param name="format">The format type.</param>
+	/// <returns>The candles storage.</returns>
+	public static IMarketDataStorage<CandleMessage> GetTimeFrameCandleMessageStorage(this IStorageRegistry registry, SecurityId securityId, TimeSpan arg, IMarketDataDrive drive = null, StorageFormats format = StorageFormats.Binary)
+		=> registry.CheckOnNull(nameof(registry)).GetCandleMessageStorage(securityId, arg.TimeFrame(), drive, format);
+
+	/// <summary>
+	/// To get the candles storage for the specified instrument.
+	/// </summary>
+	/// <param name="registry"><see cref="IStorageRegistry"/>.</param>
+	/// <param name="subscription"><see cref="Subscription"/>.</param>
+	/// <param name="drive">The storage.</param>
+	/// <param name="format">The format type.</param>
+	/// <returns>The candles storage.</returns>
+	public static IMarketDataStorage<CandleMessage> GetCandleMessageStorage(this IStorageRegistry registry, Subscription subscription, IMarketDataDrive drive = null, StorageFormats format = StorageFormats.Binary)
+	{
+		if (registry is null)
+			throw new ArgumentNullException(nameof(registry));
+
+		if (subscription is null)
+			throw new ArgumentNullException(nameof(subscription));
+
+		if (subscription.SecurityId is null)
+			throw new ArgumentException(nameof(subscription));
+
+		return registry.GetCandleMessageStorage(subscription.SecurityId.Value, subscription.DataType, drive, format);
+	}
+}
+
+/// <summary>
+/// Context for <see cref="StorageHelper.LoadMessagesAsync"/> operation that holds metadata about the load result.
+/// </summary>
+public sealed class StorageLoadContext
+{
+	/// <summary>
+	/// Last message time.
+	/// </summary>
+	public DateTime? LastDate { get; private set; }
+
+	/// <summary>
+	/// Remaining count.
+	/// </summary>
+	public long? Left { get; private set; }
+
+	/// <summary>
+	/// Indicates whether any data was loaded.
+	/// </summary>
+	public bool HasData { get; private set; }
+
+	internal void Update(DateTime? lastDate, long? left)
+	{
+		LastDate = lastDate;
+		Left = left;
+		HasData = lastDate != null;
+	}
+}

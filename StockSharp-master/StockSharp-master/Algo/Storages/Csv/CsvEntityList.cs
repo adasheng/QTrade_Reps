@@ -1,0 +1,491 @@
+namespace StockSharp.Algo.Storages.Csv;
+
+using System.IO.Compression;
+
+using Ecng.IO;
+using Ecng.IO.Compression;
+
+/// <summary>
+/// The interface for presentation in the form of list of trade objects, received from the external storage.
+/// </summary>
+public interface ICsvEntityList : IAsyncDisposable
+{
+	/// <summary>
+	/// Initialize the storage.
+	/// </summary>
+	/// <param name="errors">Possible errors.</param>
+	/// <param name="cancellationToken"><see cref="CancellationToken"/></param>
+	ValueTask InitAsync(IList<Exception> errors, CancellationToken cancellationToken);
+
+	/// <summary>
+	/// CSV file name.
+	/// </summary>
+	string FileName { get; }
+
+	/// <summary>
+	/// Create archived copy.
+	/// </summary>
+	bool CreateArchivedCopy { get; set; }
+
+	/// <summary>
+	/// Get archived copy body.
+	/// </summary>
+	/// <returns>File body.</returns>
+	byte[] GetCopy();
+}
+
+/// <summary>
+/// List of trade objects, received from the CSV storage.
+/// </summary>
+/// <typeparam name="TKey">Key type.</typeparam>
+/// <typeparam name="TEntity">Entity type.</typeparam>
+public abstract class CsvEntityList<TKey, TEntity> : SynchronizedList<TEntity>, IStorageEntityList<TEntity>, ICsvEntityList
+	where TEntity : class
+{
+	private readonly CachedSynchronizedDictionary<TKey, TEntity> _items = [];
+
+	private readonly Lock _copySync = new();
+	private byte[] _copy;
+
+	private readonly ChannelExecutor _executor;
+    private readonly IChannelExecutorGroup _group;
+    private CsvFileWriter _writer;
+	private volatile bool _disposed;
+
+	/// <summary>
+	/// The CSV storage of trading objects.
+	/// </summary>
+	protected CsvEntityRegistry Registry { get; }
+
+	private IFileSystem FileSystem => Registry.FileSystem;
+
+	/// <inheritdoc />
+	public TEntity[] Cache => _items.CachedValues;
+
+	/// <summary>
+	/// Initializes a new instance of the <see cref="CsvEntityList{TKey,TEntity}"/>.
+	/// </summary>
+	/// <param name="registry">The CSV storage of trading objects.</param>
+	/// <param name="fileName">CSV file name.</param>
+	/// <param name="executor">Sequential operation executor for disk access synchronization.</param>
+	protected CsvEntityList(CsvEntityRegistry registry, string fileName, ChannelExecutor executor)
+	{
+		if (fileName.IsEmpty())
+			throw new ArgumentNullException(nameof(fileName));
+
+		Registry = registry ?? throw new ArgumentNullException(nameof(registry));
+		_executor = executor ?? throw new ArgumentNullException(nameof(executor));
+		_group = _executor.CreateGroup(t =>
+		{
+			EnsureStream();
+			ResetCopy();
+			return default;
+		}, t => _writer.CommitAsync(t));
+
+		FileName = Path.Combine(Registry.Path, fileName);
+	}
+
+	/// <summary>
+	/// Disposes the resources.
+	/// </summary>
+	public async ValueTask DisposeAsync()
+	{
+		if (_disposed)
+			return;
+
+		_disposed = true;
+
+		await _executor.AddAndWaitAsync(_ =>
+		{
+			ResetStream();
+			return default;
+		});
+
+		GC.SuppressFinalize(this);
+	}
+
+	private void ThrowIfDisposed()
+	{
+		if (_disposed)
+			throw new ObjectDisposedException(GetType().Name);
+	}
+
+	private void EnsureStream()
+	{
+		if (_writer != null)
+			return;
+
+		var dir = Path.GetDirectoryName(FileName);
+		FileSystem.CreateDirectory(dir);
+
+		var stream = new TransactionFileStream(FileSystem, FileName, FileMode.Append);
+		_writer = stream.CreateCsvWriter(Registry.Encoding, false);
+	}
+
+	private void ResetStream()
+	{
+		_writer?.Dispose();
+		_writer = null;
+	}
+
+	/// <inheritdoc />
+	public string FileName { get; }
+
+	/// <inheritdoc />
+	public bool CreateArchivedCopy { get; set; }
+
+	/// <inheritdoc />
+	public byte[] GetCopy()
+	{
+		if (!CreateArchivedCopy)
+			throw new NotSupportedException();
+
+		byte[] body;
+
+		using (_copySync.EnterScope())
+			body = _copy;
+
+		if (body is null)
+		{
+			using (_copySync.EnterScope())
+			{
+				body = FileSystem.FileExists(FileName)
+					? FileSystem.ReadAllBytes(FileName)
+					: [];
+			}
+
+			body = body.Compress<GZipStream>();
+
+			using (_copySync.EnterScope())
+				_copy ??= body;
+		}
+
+		return body;
+	}
+
+	private void ResetCopy()
+	{
+		if (!CreateArchivedCopy)
+			return;
+
+		using (_copySync.EnterScope())
+			_copy = null;
+	}
+
+	#region IStorageEntityList<T>
+
+	TEntity IStorageEntityList<TEntity>.ReadById(object id)
+	{
+		using (EnterScope())
+			return _items.TryGetValue(NormalizedKey(id));
+	}
+
+	private TKey GetNormalizedKey(TEntity entity)
+	{
+		return NormalizedKey(GetKey(entity));
+	}
+
+	private static readonly bool _isSecId = typeof(TKey) == typeof(SecurityId);
+
+	private static TKey NormalizedKey(object key)
+	{
+		if (key is string str)
+		{
+			str = str.ToLowerInvariant();
+
+			if (_isSecId)
+			{
+				// backward compatibility when SecurityList accept as a key string
+				key = str.ToSecurityId();
+			}
+			else
+				key = str;
+		}
+
+		return (TKey)key;
+	}
+
+	/// <inheritdoc />
+	public void Save(TEntity entity)
+	{
+		Save(entity, false);
+	}
+
+	/// <summary>
+	/// Save object into storage.
+	/// </summary>
+	/// <param name="entity">Trade object.</param>
+	/// <param name="forced">Forced update.</param>
+	public virtual void Save(TEntity entity, bool forced)
+	{
+		using (EnterScope())
+		{
+			var item = _items.TryGetValue(GetNormalizedKey(entity));
+
+			if (item == null)
+			{
+				Add(entity);
+				return;
+			}
+			else if (IsChanged(entity, forced))
+				UpdateCache(entity);
+			else
+				return;
+
+			WriteMany([.. _items.Values]);
+		}
+	}
+
+	#endregion
+
+	/// <summary>
+	/// Is <paramref name="entity"/> changed.
+	/// </summary>
+	/// <param name="entity">Trade object.</param>
+	/// <param name="forced">Forced update.</param>
+	/// <returns>Is changed.</returns>
+	protected virtual bool IsChanged(TEntity entity, bool forced)
+	{
+		return true;
+	}
+
+	/// <summary>
+	/// Get key from trade object.
+	/// </summary>
+	/// <param name="item">Trade object.</param>
+	/// <returns>The key.</returns>
+	protected abstract TKey GetKey(TEntity item);
+
+	/// <summary>
+	/// Write data into CSV.
+	/// </summary>
+	/// <param name="writer">CSV writer.</param>
+	/// <param name="data">Trade object.</param>
+	/// <param name="cancellationToken"><see cref="CancellationToken"/></param>
+	protected abstract ValueTask WriteAsync(CsvFileWriter writer, TEntity data, CancellationToken cancellationToken);
+
+	/// <summary>
+	/// Read data from CSV.
+	/// </summary>
+	/// <param name="reader">CSV reader.</param>
+	/// <returns>Trade object.</returns>
+	protected abstract TEntity Read(FastCsvReader reader);
+
+	/// <inheritdoc />
+	public override bool Contains(TEntity item)
+	{
+		using (EnterScope())
+			return _items.ContainsKey(GetNormalizedKey(item));
+	}
+
+	/// <inheritdoc />
+	protected override bool OnAdding(TEntity item)
+	{
+		ThrowIfDisposed();
+
+		using (EnterScope())
+		{
+			if (!_items.TryAdd2(GetNormalizedKey(item), item))
+				return false;
+
+			AddCache(item);
+
+			_group.Add(t => WriteAsync(_writer, item, t));
+		}
+
+		return base.OnAdding(item);
+	}
+
+	/// <inheritdoc />
+	protected override void OnRemoved(TEntity item)
+	{
+		ThrowIfDisposed();
+
+		base.OnRemoved(item);
+
+		using (EnterScope())
+		{
+			_items.Remove(GetNormalizedKey(item));
+			RemoveCache(item);
+
+			WriteMany([.. _items.Values]);
+		}
+	}
+
+	/// <inheritdoc />
+	protected void OnRemovedRange(IEnumerable<TEntity> items)
+	{
+		ThrowIfDisposed();
+
+		using (EnterScope())
+		{
+			foreach (var item in items)
+			{
+				_items.Remove(GetNormalizedKey(item));
+				RemoveCache(item);
+			}
+
+			WriteMany([.. _items.Values]);
+		}
+	}
+
+	/// <inheritdoc />
+	protected override void OnCleared()
+	{
+		ThrowIfDisposed();
+
+		base.OnCleared();
+
+		using (EnterScope())
+		{
+			_items.Clear();
+			ClearCache();
+
+			_executor.Add(_ =>
+			{
+				ResetStream();
+				ResetCopy();
+
+				FileSystem.DeleteFile(FileName);
+				return default;
+			});
+		}
+	}
+
+	/// <summary>
+	/// Write data into storage.
+	/// </summary>
+	/// <param name="values">Trading objects.</param>
+	private void WriteMany(TEntity[] values)
+	{
+		ThrowIfDisposed();
+
+		var valuesCopy = values;
+		_executor.Add(async t =>
+		{
+			ResetStream();
+
+			var dir = Path.GetDirectoryName(FileName);
+			FileSystem.CreateDirectory(dir);
+
+			var stream = new TransactionFileStream(FileSystem, FileName, FileMode.Create);
+			_writer = stream.CreateCsvWriter(Registry.Encoding, false);
+
+			ResetCopy();
+
+			foreach (var item in valuesCopy)
+				await WriteAsync(_writer, item, t);
+
+			await _writer.CommitAsync(t);
+		});
+	}
+
+	async ValueTask ICsvEntityList.InitAsync(IList<Exception> errors, CancellationToken cancellationToken)
+	{
+		if (errors == null)
+			throw new ArgumentNullException(nameof(errors));
+
+		if (!FileSystem.FileExists(FileName))
+			return;
+
+		var hasDuplicates = false;
+
+		await Do.InvariantAsync(async () =>
+		{
+			using var reader = FileSystem.OpenRead(FileName).CreateCsvReader(Registry.Encoding, leaveOpen: false);
+
+			var currErrors = 0;
+
+			while (await reader.NextLineAsync(cancellationToken))
+			{
+				try
+				{
+					var item = Read(reader);
+					var key = GetNormalizedKey(item);
+
+					using (EnterScope())
+					{
+						if (_items.TryAdd2(key, item))
+						{
+							InnerCollection.Add(item);
+							AddCache(item);
+						}
+						else
+							hasDuplicates = true;
+					}
+
+					currErrors = 0;
+				}
+				catch (Exception ex)
+				{
+					if (errors.Count < 100)
+						errors.Add(ex);
+
+					currErrors++;
+
+					if (currErrors >= 1000)
+						break;
+				}
+			}
+		});
+
+		if (hasDuplicates)
+		{
+			try
+			{
+				var arr = this.SyncGet(c => c.ToArray());
+
+				using var stream = new TransactionFileStream(FileSystem, FileName, FileMode.Create);
+				using var writer = stream.CreateCsvWriter(Registry.Encoding);
+
+				foreach (var item in arr)
+					await WriteAsync(writer, item, cancellationToken);
+
+				await writer.CommitAsync(cancellationToken);
+			}
+			catch (Exception ex)
+			{
+				errors.Add(ex);
+			}
+		}
+
+		InnerCollection.ForEach(OnAdded);
+	}
+
+	/// <summary>
+	/// Clear cache.
+	/// </summary>
+	protected virtual void ClearCache()
+	{
+	}
+
+	/// <summary>
+	/// Add item to cache.
+	/// </summary>
+	/// <param name="item">New item.</param>
+	protected virtual void AddCache(TEntity item)
+	{
+	}
+
+	/// <summary>
+	/// Update item in cache.
+	/// </summary>
+	/// <param name="item">Item.</param>
+	protected virtual void UpdateCache(TEntity item)
+	{
+	}
+
+	/// <summary>
+	/// Remove item from cache.
+	/// </summary>
+	/// <param name="item">Item.</param>
+	protected virtual void RemoveCache(TEntity item)
+	{
+	}
+
+	/// <inheritdoc />
+	public override string ToString()
+	{
+		return FileName;
+	}
+}

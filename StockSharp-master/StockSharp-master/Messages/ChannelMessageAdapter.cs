@@ -1,0 +1,91 @@
+namespace StockSharp.Messages;
+
+/// <summary>
+/// Message adapter, forward messages through a transport channel <see cref="IMessageChannel"/>.
+/// </summary>
+public class ChannelMessageAdapter : MessageAdapterWrapper
+{
+	/// <summary>
+	/// Initializes a new instance of the <see cref="ChannelMessageAdapter"/>.
+	/// </summary>
+	/// <param name="innerAdapter">Underlying adapter.</param>
+	/// <param name="inputChannel">Incoming messages channel.</param>
+	/// <param name="outputChannel">Outgoing message channel.</param>
+	public ChannelMessageAdapter(IMessageAdapter innerAdapter, IMessageChannel inputChannel, IMessageChannel outputChannel)
+		: base(innerAdapter)
+	{
+		InputChannel = inputChannel ?? throw new ArgumentNullException(nameof(inputChannel));
+		OutputChannel = outputChannel ?? throw new ArgumentNullException(nameof(outputChannel));
+
+		InputChannel.NewOutMessageAsync += InputChannelOnNewOutMessage;
+		OutputChannel.NewOutMessageAsync += OutputChannelOnNewOutMessage;
+	}
+
+	/// <summary>
+	/// Adapter.
+	/// </summary>
+	public IMessageChannel InputChannel { get; }
+
+	/// <summary>
+	/// Adapter.
+	/// </summary>
+	public IMessageChannel OutputChannel { get; }
+
+	/// <summary>
+	/// Control the lifetime of the incoming messages channel.
+	/// </summary>
+	public bool OwnInputChannel { get; set; } = true;
+
+	/// <summary>
+	/// Control the lifetime of the outgoing messages channel.
+	/// </summary>
+	public bool OwnOutputChannel { get; set; } = true;
+
+	private ValueTask InputChannelOnNewOutMessage(Message message, CancellationToken cancellationToken)
+		=> InnerAdapter.SendInMessageAsync(message, cancellationToken);
+
+	private ValueTask OutputChannelOnNewOutMessage(Message message, CancellationToken cancellationToken)
+		=> RaiseNewOutMessageAsync(message, cancellationToken);
+
+	/// <inheritdoc />
+	protected override ValueTask OnInnerAdapterNewOutMessageAsync(Message message, CancellationToken cancellationToken)
+	{
+		if (!OutputChannel.IsOpened())
+			OutputChannel.Open();
+
+		return OutputChannel.SendInMessageAsync(message, cancellationToken);
+	}
+
+	/// <inheritdoc />
+	public override void Dispose()
+	{
+		InputChannel.NewOutMessageAsync -= InputChannelOnNewOutMessage;
+		OutputChannel.NewOutMessageAsync -= OutputChannelOnNewOutMessage;
+
+		if (OwnInputChannel)
+			InputChannel.Dispose();
+
+		if (OwnOutputChannel)
+			OutputChannel.Dispose();
+
+		base.Dispose();
+	}
+
+	/// <inheritdoc />
+	protected override ValueTask OnSendInMessageAsync(Message message, CancellationToken cancellationToken)
+	{
+		if (!InputChannel.IsOpened())
+			InputChannel.Open();
+
+		return InputChannel.SendInMessageAsync(message, cancellationToken);
+	}
+
+	/// <summary>
+	/// Create a copy of <see cref="ChannelMessageAdapter"/>.
+	/// </summary>
+	/// <returns>Copy.</returns>
+	public override IMessageAdapter Clone()
+	{
+		return new ChannelMessageAdapter(InnerAdapter.TypedClone(), InputChannel.TypedClone(), OutputChannel.TypedClone());
+	}
+}

@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>TradeSight Blog — Python Trading Systems</title>
+  <subtitle>Open-source Python algorithmic trading: signals, strategies, and real paper trading results.</subtitle>
+  <link href="https://rmbell09-lang.github.io/tradesight/feed.xml" rel="self" type="application/atom+xml"/>
+  <link href="https://rmbell09-lang.github.io/tradesight/blog/" rel="alternate" type="text/html"/>
+  <id>https://rmbell09-lang.github.io/tradesight/</id>
+  <updated>2026-04-06T17:00:00Z</updated>
+  <author>
+    <name>TradeSight Project</name>
+    <uri>https://github.com/rmbell09-lang/tradesight</uri>
+  </author>
+  <icon>https://rmbell09-lang.github.io/tradesight/logo.png</icon>
+  <rights>MIT License — open source</rights>
+
+
+  <entry>
+    <title>TradeSight vs QuantConnect: Head-to-Head Comparison (2026)</title>
+    <link href="https://rmbell09-lang.github.io/tradesight/blog/quantconnect-alternative-python.html" rel="alternate" type="text/html"/>
+    <id>https://rmbell09-lang.github.io/tradesight/blog/quantconnect-alternative-python.html</id>
+    <published>2026-04-06T17:00:00Z</published>
+    <updated>2026-04-06T17:00:00Z</updated>
+    <category term="comparison" label="Comparison"/>
+    <category term="quantconnect" label="QuantConnect"/>
+    <category term="python" label="Python"/>
+    <summary type="text">
+      QuantConnect vs TradeSight: honest head-to-head on pricing, setup, backtesting depth, paper trading, and strategy workflow. When the $240/yr subscription is worth it -- and when free + local wins.
+    </summary>
+  </entry>
+  <entry>
+    <title>Python Backtesting Libraries in 2026: Backtrader vs Zipline vs VectorBT vs TradeSight</title>
+    <link href="https://rmbell09-lang.github.io/tradesight/blog/python-backtesting-libraries-2026.html" rel="alternate" type="text/html"/>
+    <id>https://rmbell09-lang.github.io/tradesight/blog/python-backtesting-libraries-2026.html</id>
+    <updated>2026-04-03T18:00:00Z</updated>
+    <summary>An honest comparison of Backtrader, Zipline, VectorBT, and TradeSight in 2026. Each has real tradeoffs worth knowing before you commit to one.</summary>
+    <author><name>TradeSight Project</name></author>
+  </entry>
+
+  <entry>
+    <title>MACD Momentum Strategy in Python: Implementation and Live Paper Trading Results</title>
+    <link href="https://rmbell09-lang.github.io/tradesight/blog/macd-momentum-strategy.html" rel="alternate" type="text/html"/>
+    <id>https://rmbell09-lang.github.io/tradesight/blog/macd-momentum-strategy.html</id>
+    <published>2026-04-03T12:00:00Z</published>
+    <updated>2026-04-03T12:00:00Z</updated>
+    <category term="python" label="Python"/>
+    <category term="MACD" label="MACD"/>
+    <category term="momentum" label="Momentum Trading"/>
+    <summary type="text">
+      Deep dive into MACD crossover strategy in Python: the adjust=False gotcha in pandas EWM,
+      histogram divergence signals, SMA trend filter that cut false signals by 40%, and live paper
+      trading results: 82% win rate with trend filter vs 63% without.
+    </summary>
+    <content type="html">
+        <entry>lt;p  <entry>gt;MACD momentum strategy in Python — built into   <entry>lt;a href="https://rmbell09-lang.github.io/tradesight/"  <entry>gt;TradeSight  <entry>lt;/a  <entry>gt;. Covers the 12/26/9 EMA implementation with adjust=False, crossover vs histogram divergence signals, and an SMA trend filter that cut false signals by 40% in backtesting.  <entry>lt;/p  <entry>gt;
+        <entry>lt;p  <entry>gt;Paper trading results:   <entry>lt;strong  <entry>gt;11 trades, 7 wins  <entry>lt;/strong  <entry>gt;. 82% win rate with trend filter vs 63% without. Best: JPM +0.51% on clean bullish crossover.  <entry>lt;/p  <entry>gt;
+        <entry>lt;p  <entry>gt;  <entry>lt;a href="https://rmbell09-lang.github.io/tradesight/blog/macd-momentum-strategy.html"  <entry>gt;Read the full post →  <entry>lt;/a  <entry>gt;  <entry>lt;/p  <entry>gt;
+    </content>
+  </entry>
+
+  <entry>
+    <title>How to Measure Trading Strategy Performance in Python</title>
+    <link href="https://rmbell09-lang.github.io/tradesight/blog/trading-strategy-performance-metrics.html" rel="alternate" type="text/html"/>
+    <id>https://rmbell09-lang.github.io/tradesight/blog/trading-strategy-performance-metrics.html</id>
+    <published>2026-04-03T01:00:00Z</published>
+    <updated>2026-04-03T01:00:00Z</updated>
+    <category term="python" label="Python"/>
+    <category term="backtesting" label="Backtesting"/>
+    <category term="performance" label="Performance Metrics"/>
+    <category term="open-source" label="Open Source"/>
+    <summary type="text">
+      Sharpe ratio, max drawdown, win rate, profit factor, and Calmar ratio — the five Python implementations
+      you need to evaluate whether a trading strategy is worth running live. Includes real TradeSight
+      tournament benchmarks and a composite scoring system.
+    </summary>
+    <content type="html">
+      &lt;p&gt;A strategy that made 20% last year sounds great — until you learn it had a 40% max drawdown and got lucky on one spike. This post covers the five metrics I use in &lt;a href="https://rmbell09-lang.github.io/tradesight/"&gt;TradeSight&lt;/a&gt; to evaluate every strategy before it goes live.&lt;/p&gt;
+      &lt;p&gt;All implementations are pure Python + pandas + numpy — no special libraries needed. Includes a composite scorecard that TradeSight uses in its overnight tournament to rank 200+ strategy variants.&lt;/p&gt;
+      &lt;p&gt;&lt;a href="https://rmbell09-lang.github.io/tradesight/blog/trading-strategy-performance-metrics.html"&gt;Read the full post →&lt;/a&gt;&lt;/p&gt;
+    </content>
+  </entry>
+
+  
+    <title>Building a Paper Trading Bot with Python + Alpaca API</title>
+    <link href="https://rmbell09-lang.github.io/tradesight/blog/paper-trading-bot.html" rel="alternate" type="text/html"/>
+    <id>https://rmbell09-lang.github.io/tradesight/blog/paper-trading-bot.html</id>
+    <published>2026-04-02T19:00:00Z</published>
+    <updated>2026-04-02T19:00:00Z</updated>
+    <category term="python" label="Python"/>
+    <category term="paper-trading" label="Paper Trading"/>
+    <category term="alpaca-api" label="Alpaca API"/>
+    <summary type="text">
+      How TradeSight runs 4 concurrent strategies (MACD, RSI, VWAP, Bollinger) against Alpaca paper trading API.
+      Live results: +6.43% portfolio return. MACD leading, RSI struggling in high-VIX regime. Full code included.
+    </summary>
+    <content type="html">
+      &amp;lt;p&amp;gt;TradeSight is an open-source Python paper trading bot that runs 4 concurrent strategies against Alpaca paper API. This post covers the architecture, the MACD implementation, and live results from the past week.&amp;lt;/p&amp;gt;
+      &amp;lt;p&amp;gt;Portfolio: &amp;lt;strong&amp;gt;+6.43%&amp;lt;/strong&amp;gt; over ~32 trades. MACD Crossover +.89 on JPM. RSI struggling at -.77 net (high VIX kills mean reversion). Bollinger Breakout solid at +.44.&amp;lt;/p&amp;gt;
+      &amp;lt;p&amp;gt;&amp;lt;a href="https://rmbell09-lang.github.io/tradesight/blog/paper-trading-bot.html"&amp;gt;Read the full post →&amp;lt;/a&amp;gt;&amp;lt;/p&amp;gt;
+    </content>
+  </entry>
+
+  <entry>
+    <title>MACD Momentum Strategy in Python: Implementation and Live Paper Trading Results</title>
+    <link href="https://rmbell09-lang.github.io/tradesight/blog/macd-momentum-strategy.html" rel="alternate" type="text/html"/>
+    <id>https://rmbell09-lang.github.io/tradesight/blog/macd-momentum-strategy.html</id>
+    <published>2026-04-03T12:00:00Z</published>
+    <updated>2026-04-03T12:00:00Z</updated>
+    <category term="python" label="Python"/>
+    <category term="MACD" label="MACD"/>
+    <category term="momentum" label="Momentum Trading"/>
+    <summary type="text">
+      Deep dive into MACD crossover strategy in Python: the adjust=False gotcha in pandas EWM,
+      histogram divergence signals, SMA trend filter that cut false signals by 40%, and live paper
+      trading results: 82% win rate with trend filter vs 63% without.
+    </summary>
+    <content type="html">
+        <entry>lt;p  <entry>gt;MACD momentum strategy in Python — built into   <entry>lt;a href="https://rmbell09-lang.github.io/tradesight/"  <entry>gt;TradeSight  <entry>lt;/a  <entry>gt;. Covers the 12/26/9 EMA implementation with adjust=False, crossover vs histogram divergence signals, and an SMA trend filter that cut false signals by 40% in backtesting.  <entry>lt;/p  <entry>gt;
+        <entry>lt;p  <entry>gt;Paper trading results:   <entry>lt;strong  <entry>gt;11 trades, 7 wins  <entry>lt;/strong  <entry>gt;. 82% win rate with trend filter vs 63% without. Best: JPM +0.51% on clean bullish crossover.  <entry>lt;/p  <entry>gt;
+        <entry>lt;p  <entry>gt;  <entry>lt;a href="https://rmbell09-lang.github.io/tradesight/blog/macd-momentum-strategy.html"  <entry>gt;Read the full post →  <entry>lt;/a  <entry>gt;  <entry>lt;/p  <entry>gt;
+    </content>
+  </entry>
+
+  <entry>
+    <title>Building a Python Stock Scanner with RSI Signals</title>
+    <link href="https://rmbell09-lang.github.io/tradesight/blog/python-rsi-stock-scanner.html" rel="alternate" type="text/html"/>
+    <id>https://rmbell09-lang.github.io/tradesight/blog/python-rsi-stock-scanner.html</id>
+    <published>2026-04-02T12:00:00Z</published>
+    <updated>2026-04-02T12:00:00Z</updated>
+    <category term="python" label="Python"/>
+    <category term="trading" label="Algorithmic Trading"/>
+    <category term="open-source" label="Open Source"/>
+    <summary type="text">
+      How I built a stock scanner using RSI, MACD, and relative volume signals in Python — with yfinance,
+      pandas, and a circuit breaker that eliminated drawdown spirals. Includes live paper trading results
+      (+6.43% return over 3 weeks on a $532 virtual portfolio).
+    </summary>
+    <content type="html">
+      &lt;p&gt;I&apos;ve been building &lt;a href="https://rmbell09-lang.github.io/tradesight/"&gt;TradeSight&lt;/a&gt; — an open-source algorithmic trading system written in Python. At its core is a stock scanner that uses momentum signals (RSI, MACD, volume) to surface trade setups across 50+ symbols in real time.&lt;/p&gt;
+
+      &lt;p&gt;Three weeks of paper trading: &lt;strong&gt;+6.43% return&lt;/strong&gt; on a $532 virtual portfolio. 3 active strategies. 0 crashes since adding a circuit breaker.&lt;/p&gt;
+
+      &lt;p&gt;This post covers the RSI calculation (the ewm vs rolling gotcha), the multi-signal scoring system, and the simple circuit breaker pattern that stopped the drawdown spiral.&lt;/p&gt;
+
+      &lt;p&gt;&lt;a href="https://rmbell09-lang.github.io/tradesight/blog/python-rsi-stock-scanner.html"&gt;Read the full post →&lt;/a&gt;&lt;/p&gt;
+    </content>
+  </entry>
+
+</feed>

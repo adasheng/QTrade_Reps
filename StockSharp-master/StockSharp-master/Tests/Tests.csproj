@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\common_target_tests.props" />
+  <ItemGroup>
+    <Compile Include="..\Designer.Templates\Backtest\SmaStrategy.cs" Link="SmaStrategy.cs" />
+    <Compile Include="..\Designer.Templates\Backtest\SmaServerStopStrategy.cs" Link="SmaServerStopStrategy.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Ecng.Excel.OpenXml" Version="$(EcngVer)" />
+    <PackageReference Include="Ecng.Data.Ado" Version="$(EcngVer)" />
+    <PackageReference Include="Ecng.Data.SqlServer" Version="$(EcngVer)" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="$(MsSqlClientVer)" />
+    <PackageReference Include="StockSharp.Samples.HistoryData" Version="$(StockSharpVer)" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Resources\Reports\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Algo.Analytics\Algo.Analytics.csproj" />
+    <ProjectReference Include="..\Algo.Compilation\Algo.Compilation.csproj" />
+    <ProjectReference Include="..\Algo.Export\Algo.Export.csproj" />
+    <ProjectReference Include="..\Algo.Import\Algo.Import.csproj" />
+    <ProjectReference Include="..\Algo.Gpu\Algo.Gpu.csproj" />
+    <ProjectReference Include="..\Algo.Indicators\Algo.Indicators.csproj" />
+    <ProjectReference Include="..\Algo.Strategies\Algo.Strategies.csproj" />
+    <ProjectReference Include="..\Algo.Testing\Algo.Testing.csproj" />
+    <ProjectReference Include="..\MatchingEngine\MatchingEngine.csproj" />
+    <ProjectReference Include="..\Diagram.Core\Diagram.Core.csproj" />
+    <ProjectReference Include="..\Alerts.Interfaces\Alerts.Interfaces.csproj" />
+  </ItemGroup>
+</Project>

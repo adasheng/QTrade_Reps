@@ -1,0 +1,631 @@
+﻿namespace StockSharp.Tests;
+
+using System.ComponentModel;
+using System.Drawing;
+
+using Ecng.Compilation;
+using Ecng.Drawing;
+using Ecng.Reflection;
+
+using IronPython.Runtime.Types;
+
+using Microsoft.FSharp.Control;
+
+using StockSharp.Algo.Analytics;
+using StockSharp.Algo.Compilation;
+using StockSharp.Diagram;
+
+[TestClass]
+public class CompilationTests : BaseTestClass
+{
+	// Synchronization object for Python script execution
+	// IronPython's ScriptEngine is not thread-safe
+	private static readonly object _pythonSyncRoot = new();
+
+	private static readonly string _analyticsFolder = "../../../../Algo.Analytics.{0}";
+
+	[TestMethod]
+	public Task CSharpAnalyticsScripts() => TestAnalyticsScripts(_analyticsFolder.Put("CSharp"), FileExts.CSharp, CancellationToken);
+
+	[TestMethod]
+	public Task FSharpAnalyticsScripts() => TestAnalyticsScripts(_analyticsFolder.Put("FSharp"), FileExts.FSharp, CancellationToken);
+
+	[TestMethod]
+	public Task PythonAnalyticsScripts() => TestAnalyticsScripts(_analyticsFolder.Put("Python"), FileExts.Python, CancellationToken);
+
+	[TestMethod]
+	public Task PythonAnalyticsScriptsParallel() => TestAnalyticsScriptsParallel(_analyticsFolder.Put("Python"), FileExts.Python, CancellationToken);
+
+	private static async Task TestAnalyticsScriptsParallel(string folderPath, string fileExtension, CancellationToken token)
+	{
+		ICompiler compiler = ServicesRegistry.CompilerProvider[fileExtension];
+
+		// Get all script files in the folder
+		var scriptFiles = Directory.GetFiles(folderPath, $"*{fileExtension}");
+		(scriptFiles.Length > 0).AssertTrue("Ensure there are scripts to test");
+
+		var securities = new[]
+		{
+			"EUR/USD@DUKAS".ToSecurityId(),
+			"EUR/AUD@DUKAS".ToSecurityId(),
+			"GBP/AUD@DUKAS".ToSecurityId(),
+		};
+		var from = new DateTime(2025, 4, 1).UtcKind();
+		var to = new DateTime(2025, 4, 30).UtcKind();
+		var storageRegistry = Helper.GetResourceStorage();
+		var format = StorageFormats.Binary;
+		var timeFrame = TimeSpan.FromMinutes(1).TimeFrame();
+
+		var references = CodeExtensions.DefaultReferences
+			.Concat(CodeExtensions.CreateAssemblyReferences(
+			[
+				"StockSharp.Algo.Analytics",
+				"MathNet.Numerics"
+			]));
+
+		var refs = (await references.ToValidRefImages(token)).ToArray();
+
+		// Run all scripts in parallel
+		// Note: We wrap the entire compile + execute in a lock because IronPython's
+		// ScriptEngine is not thread-safe for compilation, module loading, or execution
+		var tasks = scriptFiles.Select(async scriptFile =>
+		{
+			var scriptName = Path.GetFileNameWithoutExtension(scriptFile);
+
+			try
+			{
+				if (scriptName.StartsWithIgnoreCase("empty"))
+					return;
+
+				var sourceCode = await File.ReadAllTextAsync(scriptFile, token);
+
+				// Compile the script
+				var sources = new string[] { sourceCode };
+
+				// ScriptEngine is not thread-safe - synchronize all engine operations
+				lock (_pythonSyncRoot)
+				{
+					var context = compiler.CreateContext();
+
+					var res = compiler.Compile(
+						scriptName,
+						sources,
+						refs,
+						token).Result;
+
+					Validate(res);
+
+					var assembly = res.GetAssembly(context);
+					assembly.AssertNotNull();
+
+					var types = assembly.GetExportedTypes();
+					var analyticsScriptType = types.First(t => t.IsRequiredType<IAnalyticsScript>());
+
+					// Create an instance of the script and run
+					var script = analyticsScriptType.CreateInstance<IAnalyticsScript>();
+					script.AssertNotNull();
+
+					// Test script execution with mock data
+					RunAnalyticsScript(script, securities, from, to, storageRegistry, storageRegistry.DefaultDrive, format, timeFrame, token).Wait();
+				}
+			}
+			catch (Exception ex)
+			{
+				throw new InvalidOperationException($"Error running script '{scriptName}'.", ex);
+			}
+		});
+
+		await Task.WhenAll(tasks);
+	}
+
+	private static async Task TestAnalyticsScripts(string folderPath, string fileExtension, CancellationToken token)
+	{
+		ICompiler compiler = ServicesRegistry.CompilerProvider[fileExtension];
+
+		var usings = fileExtension == FileExts.CSharp
+			? await File.ReadAllTextAsync(Path.Combine(folderPath, "Properties", "usings.cs"), token)
+			: null;
+
+		// Get all script files in the folder
+		var scriptFiles = Directory.GetFiles(folderPath, $"*{fileExtension}");
+		(scriptFiles.Length > 0).AssertTrue("Ensure there are scripts to test");
+
+		var securities = new[]
+		{
+			"EUR/USD@DUKAS".ToSecurityId(),
+			"EUR/AUD@DUKAS".ToSecurityId(),
+			"GBP/AUD@DUKAS".ToSecurityId(),
+		};
+		var from = new DateTime(2025, 4, 1).UtcKind();
+		var to = new DateTime(2025, 4, 30).UtcKind();
+		var storageRegistry = Helper.GetResourceStorage();
+		var format = StorageFormats.Binary;
+		var timeFrame = TimeSpan.FromMinutes(1).TimeFrame();
+
+		var references = CodeExtensions.DefaultReferences
+			.Concat(CodeExtensions.CreateAssemblyReferences(
+			[
+				"StockSharp.Algo.Analytics",
+				"MathNet.Numerics"
+			]));
+
+		if (fileExtension == FileExts.FSharp)
+			references = references.Concat(CodeExtensions.FSharpReferences);
+		
+		var refs = (await references.ToValidRefImages(token)).ToArray();
+
+		foreach (var scriptFile in scriptFiles)
+		{
+			var scriptName = Path.GetFileNameWithoutExtension(scriptFile);
+
+			try
+			{
+				if (scriptName.StartsWithIgnoreCase("empty"))
+					continue;
+
+				var sourceCode = await File.ReadAllTextAsync(scriptFile, token);
+
+				// Compile the script
+
+				var sources = new string[] { sourceCode };
+
+				if (usings is not null)
+					sources = sources.Concat([usings]);
+
+				var context = compiler.CreateContext();
+
+				var res = await compiler.Compile(
+					scriptName,
+					sources,
+					refs,
+					token);
+
+				Validate(res);
+
+				var assembly = res.GetAssembly(context);
+				assembly.AssertNotNull();
+
+				var types = assembly.GetExportedTypes();
+				var analyticsScriptType = types.First(t => t.IsRequiredType<IAnalyticsScript>());
+
+				// Create an instance of the script
+				var script = analyticsScriptType.CreateInstance<IAnalyticsScript>();
+				script.AssertNotNull();
+
+				// Test script execution with mock data
+				await RunAnalyticsScript(script, securities, from, to, storageRegistry, storageRegistry.DefaultDrive, format, timeFrame, token);
+			}
+			catch (Exception ex)
+			{
+				throw new InvalidOperationException($"Error running script '{scriptName}'.", ex);
+			}
+		}
+	}
+
+	private static async Task RunAnalyticsScript(IAnalyticsScript script, SecurityId[] securities, DateTime from, DateTime to, IStorageRegistry storage, IMarketDataDrive drive, StorageFormats format, DataType dataType, CancellationToken token)
+	{
+		// Create a test panel to capture output
+		var testPanel = new TestAnalyticsPanel();
+
+		var (_, t) = token.CreateChildToken(TimeSpan.FromSeconds(60)); // 60 second timeout
+
+		// Execute the script
+		await script.Run(
+			Helper.LogManager.Application,
+			testPanel,
+			securities,
+			from,
+			to,
+			storage,
+			drive,
+			format,
+			dataType,
+			t
+		);
+
+		// Verify that the script produced some output
+		testPanel.VerifyOutputProduced();
+	}
+
+	// Test implementation of IAnalyticsPanel to verify script execution
+	private class TestAnalyticsPanel : IAnalyticsPanel
+	{
+		private readonly List<TestAnalyticsGrid> _grids = [];
+		private readonly List<ITestAnalyticsChart> _charts = [];
+		private bool _heatmapHasData;
+		private bool _chart3dHasData;
+
+		public IAnalyticsGrid CreateGrid(params string[] columns)
+		{
+			columns.AssertNotNull();
+			(columns.Length > 0).AssertTrue("columns must not be empty");
+
+			var grid = new TestAnalyticsGrid(columns);
+			_grids.Add(grid);
+			return grid;
+		}
+
+		public IAnalyticsChart<X, Y, Z> CreateChart<X, Y, Z>()
+		{
+			var chart = new TestAnalyticsChart<X, Y, Z>();
+			_charts.Add(chart);
+			return chart;
+		}
+
+		public IAnalyticsChart<X, Y, VoidType> CreateChart<X, Y>()
+		{
+			var chart = new TestAnalyticsChart<X, Y, VoidType>();
+			_charts.Add(chart);
+			return chart;
+		}
+
+		public void DrawHeatmap(IEnumerable<string> xTitles, IEnumerable<string> yTitles, double[,] data)
+		{
+			xTitles.AssertNotNull();
+			yTitles.AssertNotNull();
+			data.AssertNotNull();
+
+			// Check that data has actual content
+			var hasData = data.GetLength(0) > 0 && data.GetLength(1) > 0;
+			if (hasData)
+				_heatmapHasData = true;
+		}
+
+		public void Draw3D(IEnumerable<string> xTitles, IEnumerable<string> yTitles, double[,] data, string xTitle, string yTitle, string zTitle)
+		{
+			xTitles.AssertNotNull();
+			yTitles.AssertNotNull();
+			data.AssertNotNull();
+
+			// Check that data has actual content
+			var hasData = data.GetLength(0) > 0 && data.GetLength(1) > 0;
+			if (hasData)
+				_chart3dHasData = true;
+		}
+
+		public void VerifyOutputProduced()
+		{
+			// Check grids have rows
+			var gridsHaveData = _grids.Count > 0 && _grids.Any(g => g.RowCount > 0);
+
+			// Check charts have series with data points
+			var chartsHaveData = _charts.Count > 0 && _charts.Any(c => c.SeriesCount > 0 && c.TotalDataPoints > 0);
+
+			// At least one type of output should have been produced with actual data
+			(gridsHaveData || chartsHaveData || _heatmapHasData || _chart3dHasData).AssertTrue();
+		}
+
+		private interface ITestAnalyticsChart
+		{
+			int SeriesCount { get; }
+			int TotalDataPoints { get; }
+		}
+
+		private class TestAnalyticsGrid(string[] columns) : IAnalyticsGrid
+		{
+			private readonly List<object[]> _rows = [];
+
+			public void SetSort(string column, bool asc)
+			{
+				column.IsEmpty().AssertFalse();
+				columns.Count(c => string.Equals(c, column, StringComparison.OrdinalIgnoreCase)).AssertEqual(1);
+			}
+
+			public void SetRow(params object[] row)
+			{
+				row.AssertNotNull();
+				row.Length.AssertEqual(columns.Length);
+				_rows.Add(row);
+			}
+
+			public int RowCount => _rows.Count;
+		}
+
+		private class TestAnalyticsChart<X, Y, Z> : IAnalyticsChart<X, Y, Z>, ITestAnalyticsChart
+		{
+			private int _seriesCount;
+			private int _totalDataPoints;
+
+			public void Append(string title, IEnumerable<X> xValues, IEnumerable<Y> yValues, DrawStyles style, Color? color)
+			{
+				title.IsEmpty().AssertFalse();
+				xValues.AssertNotNull();
+				yValues.AssertNotNull();
+
+				// Count actual data points
+				var xCount = xValues.Count();
+				var yCount = yValues.Count();
+				xCount.AssertEqual(yCount);
+
+				_totalDataPoints += xCount;
+				_seriesCount++;
+			}
+
+			public void Append(string title, IEnumerable<X> xValues, IEnumerable<Y> yValues, IEnumerable<Z> zValues, DrawStyles style, Color? color)
+			{
+				title.IsEmpty().AssertFalse();
+				xValues.AssertNotNull();
+				yValues.AssertNotNull();
+				zValues.AssertNotNull();
+
+				// Count actual data points
+				var xCount = xValues.Count();
+				var yCount = yValues.Count();
+				var zCount = zValues.Count();
+				xCount.AssertEqual(yCount);
+				xCount.AssertEqual(zCount);
+
+				_totalDataPoints += xCount;
+				_seriesCount++;
+			}
+
+			public int SeriesCount => _seriesCount;
+			public int TotalDataPoints => _totalDataPoints;
+		}
+	}
+
+	private static readonly string _designerFolder = "../../../../Designer.Templates/";
+
+	private static void Validate(CompilationResult res)
+	{
+		ArgumentNullException.ThrowIfNull(res);
+
+		foreach (var e in res.Errors)
+		{
+			if (e.Type == CompilationErrorTypes.Error)
+				throw new InvalidOperationException(e.ToString());
+		}
+	}
+
+	private static List<PropertyDescriptor> GetBrowsableProperties(ICustomTypeDescriptor customTypeDescriptor)
+	{
+		if (customTypeDescriptor == null)
+			throw new ArgumentNullException(nameof(customTypeDescriptor));
+
+		var allProperties = customTypeDescriptor.GetProperties();
+
+		List<PropertyDescriptor> browsableProperties = [];
+
+		foreach (PropertyDescriptor prop in allProperties)
+		{
+			if (prop.Attributes[typeof(BrowsableAttribute)] is not BrowsableAttribute browsableAttr ||
+				!browsableAttr.Browsable)
+				continue;
+
+			if (prop.Attributes[typeof(EditorBrowsableAttribute)] is EditorBrowsableAttribute editorBrowsableAttr &&
+				editorBrowsableAttr.State == EditorBrowsableState.Never)
+				continue;
+
+			if (prop.Attributes[typeof(DesignOnlyAttribute)] is DesignOnlyAttribute designOnlyAttr &&
+				designOnlyAttr.IsDesignOnly)
+				continue;
+
+			browsableProperties.Add(prop);
+		}
+
+		return browsableProperties;
+	}
+
+	private void InvokeDiagramElem(Type type, DiagramExternalElement instance)
+	{
+		var evts = type.GetEvents()
+			.Where(DiagramExternalAttribute.IsExternal)
+			.ToArray();
+		evts.Length.AssertEqual(2);
+
+		var raisedCnt = 0;
+
+		foreach (var evt in evts)
+		{
+			var handlerType = evt.EventHandlerType;
+			var isFSharp = handlerType.IsFSharpHandler();
+
+			if (handlerType != typeof(Action<Unit>) && !isFSharp)
+				continue;
+
+			var evtAttrs = evt.GetAttributes().ToArray();
+			evtAttrs.Count(a => a is DiagramExternalAttribute).AssertEqual(1);
+
+			Delegate dlg;
+
+			if (isFSharp)
+			{
+				FSharpHandler<Unit> handler = (s, value) => raisedCnt++;
+				dlg = handler;
+			}
+			else
+			{
+				Action<Unit> handler = value => raisedCnt++;
+				dlg = handler;
+			}
+
+			evt.AddEventHandler(instance, dlg);
+			evt.RemoveEventHandler(instance, dlg);
+
+			evt.AddEventHandler(instance, dlg);
+			evt.AddEventHandler(instance, dlg);
+		}
+
+		var methods = type.GetMethods().ToArray();
+		methods.Count(m => m.Name == "Process").AssertEqual(1);
+
+		foreach (var method in methods)
+		{
+			if (method.Name != "Process")
+				continue;
+
+			var methodAttrs = method.GetAttributes().ToArray();
+
+			method.Invoke(instance,
+			[
+				new TimeFrameCandleMessage { ClosePrice = 100 },
+			(Unit)10,
+		]);
+		}
+
+		raisedCnt.AssertEqual(2);
+	}
+
+	[TestMethod]
+	public Task CSharpEmptyStrategy()
+		=> CSharpCompile<Strategy>("Backtest/EmptyStrategy.cs");
+
+	[TestMethod]
+	public Task CSharpSmaStrategy()
+		=> CSharpCompile<Strategy>("Backtest/SmaStrategy.cs");
+
+	[TestMethod]
+	public Task CSharpIndicator()
+		=> CSharpCompile<IIndicator>("Indicator/EmptyIndicator.cs");
+
+	[TestMethod]
+	public Task CSharpDiagramElem()
+		=> CSharpCompile<DiagramExternalElement>("Custom/EmptyDiagramElement.cs", InvokeDiagramElem);
+
+	private async Task CSharpCompile<T>(string fileName, Action<Type, T> custom = null)
+		where T : IPersistable
+	{
+		var token = CancellationToken;
+
+		ICompiler compiler = ServicesRegistry.CompilerProvider[FileExts.CSharp];
+
+		var sourceCode = File.ReadAllText(Path.Combine(_designerFolder, fileName));
+
+		var res = await compiler.Compile("test", [sourceCode], await CodeExtensions.DefaultReferences.ToValidRefImages(token), token);
+		Validate(res);
+
+		var type = res.GetAssembly(compiler.CreateContext()).GetExportedTypes().First();
+		type.IsRequiredType<T>().AssertTrue();
+		
+		var s = type.CreateInstance<T>();
+		
+		s.AssertNotNull();
+		s.Load(s.Save());
+
+		custom?.Invoke(type, s);
+	}
+
+	[TestMethod]
+	public Task FSharpEmptyStrategy()
+		=> FSharpCompile<Strategy>("Backtest/EmptyStrategy.fs");
+
+	[TestMethod]
+	public Task FSharpSmaStrategy()
+		=> FSharpCompile<Strategy>("Backtest/SmaStrategy.fs");
+
+	[TestMethod]
+	public Task FSharpIndicator()
+		=> FSharpCompile<IIndicator>("Indicator/EmptyIndicator.fs");
+
+	[TestMethod]
+	public Task FSharpDiagramElem()
+		=> FSharpCompile<DiagramExternalElement>("Custom/EmptyDiagramElement.fs", InvokeDiagramElem);
+
+	private async Task FSharpCompile<T>(string fileName, Action<Type, T> custom = null)
+		where T : IPersistable
+	{
+		var token = CancellationToken;
+
+		ICompiler compiler = ServicesRegistry.CompilerProvider[FileExts.FSharp];
+
+		var sourceCode = File.ReadAllText(Path.Combine(_designerFolder, fileName));
+
+		var fsharpRefs = CodeExtensions.FSharpReferences;
+
+		var res = await compiler.Compile("test", [sourceCode], await CodeExtensions.DefaultReferences.Concat(fsharpRefs).ToValidRefImages(token), token);
+		Validate(res);
+
+		var type = res.GetAssembly(compiler.CreateContext()).GetExportedTypes().First();
+		type.IsRequiredType<T>().AssertTrue();
+		
+		var s = type.CreateInstance<T>();
+
+		s.AssertNotNull();
+		s.Load(s.Save());
+
+		custom?.Invoke(type, s);
+	}
+
+	[TestMethod]
+	public Task PythonEmptyStrategy()
+		=> PythonCompile<Strategy>("Backtest/empty_strategy.py");
+
+	[TestMethod]
+	public Task PythonSmaStrategy()
+		=> PythonCompile<Strategy>("Backtest/sma_strategy.py");
+
+	[TestMethod]
+	public Task PythonIndicator()
+		=> PythonCompile<IIndicator>("Indicator/empty_indicator.py");
+
+	[TestMethod]
+	public Task PythonDiagramElem()
+		=> PythonCompile<DiagramExternalElement>("Custom/empty_diagram_element.py", InvokeDiagramElem);
+
+	private async Task PythonCompile<T>(string fileName, Action<Type, T> custom = null)
+		where T : IPersistable
+	{
+		var token = CancellationToken;
+
+		ICompiler compiler = ServicesRegistry.CompilerProvider[FileExts.Python];
+
+		var context = compiler.CreateContext();
+		
+		var sourceCode = File.ReadAllText(Path.Combine(_designerFolder, fileName));
+		
+		var res = await compiler.Compile(typeof(T).Name, [sourceCode], await CodeExtensions.DefaultReferences.ToValidRefImages(token), token);
+
+		Validate(res);
+
+		var asm = res.GetAssembly(context);
+
+		if (asm is null)
+			return;
+
+		var types = asm.GetExportedTypes();
+
+		res = await compiler.Compile(typeof(T).Name, [sourceCode], await CodeExtensions.DefaultReferences.ToValidRefImages(token), token);
+		asm = res.GetAssembly(context);
+		var types2 = asm.GetExportedTypes().First();
+
+		var arrs = types.Where(t => t.IsRequiredType<T>());
+		var type = arrs.First();
+		var ns = type.Namespace;
+		var fn = type.FullName;
+
+		var attrs = type.GetAttributes().ToArray();
+		var docUrl = type.GetDocUrl();
+
+		type.IsRequiredType<T>().AssertTrue();
+
+		var name = type.GetDisplayName();
+		var desc = type.GetDescription();
+		var iconUri = type.GetIconUrl();
+
+		var instance = TypeHelper.CreateInstance<T>(type);
+
+		if (instance is Strategy s)
+			s.Connector = new();
+
+		var props = GetBrowsableProperties((ICustomTypeDescriptor)instance);
+
+		var descriptor = TypeDescriptor.GetProvider(instance).GetTypeDescriptor(instance);
+
+		(instance is IPythonObject).AssertTrue();
+
+		var pythonClass = type.CreateInstance<T>();
+
+		var properties = type.GetProperties().ToArray();
+		var modifiableProperties = properties.Where(p => p.IsBrowsable() && p.IsModifiable()).ToArray();
+		//foreach (var prop in modifiableProperties)
+		//{
+		//	Console.WriteLine($"{prop.Name}={prop.PropertyType}");
+		//	Console.WriteLine(prop.GetValue(pythonClass));
+		//	Console.WriteLine();
+		//}
+
+		custom?.Invoke(type, instance);
+
+		pythonClass.Load(pythonClass.Save());
+	}
+}

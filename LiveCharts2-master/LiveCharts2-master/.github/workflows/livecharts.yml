@@ -1,0 +1,415 @@
+name: LiveCharts
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: write
+  issues: write
+
+on:
+  pull_request:
+
+jobs:
+
+  report-progress-starting:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1        
+      - uses: ./.github/actions/comment-progress
+        id: create-comment
+        with:
+          content: | 
+            #### Thanks for your contribution!
+
+            The build and test process is starting. This may take a while.
+            You can find more details below as the process continues or at the [actions tab](https://github.com/Live-Charts/LiveCharts2/actions/runs/${{ github.run_id }}).
+    outputs: 
+      comment_id: ${{ steps.create-comment.outputs.comment_id }}
+
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      suffix: ${{ steps.vars.outputs.suffix }}
+    steps:
+      - id: vars
+        run:
+          echo "suffix=dev-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+  pack: 
+    runs-on: windows-2025
+    needs: [report-progress-starting, prepare]
+    strategy:
+      matrix:
+        include:
+          - short-name: core
+            project: src/LiveChartsCore
+          - short-name: skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharp
+          - short-name: avalonia-skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharp.Avalonia
+            workloads: wasm-tools, maui
+          - short-name: blazor-skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharpView.Blazor
+          - short-name: eto-skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharpView.Eto
+          - short-name: maui-skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharpView.Maui
+            workloads: maui
+          - short-name: uno-skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharpView.Uno.WinUI
+            workloads: wasm-tools, maui
+          - short-name: winui-skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharpView.WinUI
+          - short-name: winforms-skiasharp            
+            project: src/skiasharp/LiveChartsCore.SkiaSharp.WinForms
+          - short-name: wpf-skiasharp
+            project: src/skiasharp/LiveChartsCore.SkiaSharp.WPF          
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Setup .NET and Workloads
+        uses: ./.github/actions/setup-dotnet-and-workloads
+        with:
+          workloads: ${{ matrix.workloads }}
+
+      - name: Pack
+        run: 
+          dotnet pack ${{ matrix.project }} -c Release -o artifacts /p:IsPacking=true /p:LiveChartsVersionSuffix=-${{ needs.prepare.outputs.suffix }}
+
+      - name: Upload packages
+        id: upload
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: ${{ matrix.short-name }}-package
+          retention-days: 30
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+
+  collect-packages:
+    runs-on: ubuntu-24.04
+    needs: [pack, report-progress-starting, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+    
+      - name: Merge all package artifacts into one 
+        uses: actions/upload-artifact/merge@v6
+        id: merge
+        with: 
+          name: nuget-packages 
+          pattern: "*-package"
+          retention-days: 30
+          delete-merged: true
+
+      - name: Update Comment
+        uses: ./.github/actions/comment-progress
+        with:
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+          content: |
+            
+            #### Packing complete!
+
+            You can download the NuGet packages for this build [here (dev-${{ github.run_number }})](${{ steps.merge.outputs.artifact-url }}).
+            The packages will be available for 30 days, you can either [use them directly](https://stackoverflow.com/questions/43400069/add-a-package-with-a-local-package-file-in-dotnet), or wait for this PR to be merged to have them published to NuGet.org.
+
+            #### Running tests 🧪
+            
+            Tests are running now, you can monitor their progress below or at the [actions tab](https://github.com/Live-Charts/LiveCharts2/actions/runs/${{ github.run_id }}).
+
+  test-core:
+    runs-on: windows-2025
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [ net8.0, net462 ]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: core
+          test-id: core-${{ matrix.framework }}
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          test-type: core
+          target-framework: ${{ matrix.framework }}
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  test-snapshot:
+    runs-on: windows-2025
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: snapshot
+          test-id: snapshot
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          test-type: snapshot
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  test-windows:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: avalonia-desktop
+          - id: eto
+          - id: maui
+            tf: net10.0-windows10.0.19041.0
+            workloads: maui
+          - id: uno
+            tf: net10.0-desktop
+            workloads: maui
+          - id: uno
+            tf: net10.0-windows10.0.19041.0
+            workloads: maui
+          - id: winui
+          - id: winforms-net10
+          - id: winforms-net10w19041
+          - id: winforms-net462          
+          - id: wpf-net10
+          - id: wpf-net10w19041
+          - id: wpf-net462
+          
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Run UI tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: windows
+          test-type: factos
+          test-id: ${{ matrix.id }}
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          workloads: ${{ matrix.workloads }}
+          target-framework: ${{ matrix.tf }}
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  test-linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: avalonia-desktop
+          # - id: eto, requires additional setup i think...
+          - id: uno
+            tf: net10.0-desktop
+            workloads: android
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Setup headless display
+        uses: pyvista/setup-headless-display-action@v4.2
+
+      - name: Run UI tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: linux
+          test-type: factos
+          test-id: ${{ matrix.id }}
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          workloads: ${{ matrix.workloads }}
+          target-framework: ${{ matrix.tf }}
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  test-mac:
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: avalonia-desktop
+          - id: eto
+          - id: maui
+            tf: net10.0-maccatalyst
+            workloads: maui
+          - id: uno
+            tf: net10.0-desktop
+            workloads: maui
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Run UI tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: mac
+          test-type: factos
+          test-id: ${{ matrix.id }}
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          workloads: ${{ matrix.workloads }}
+          target-framework: ${{ matrix.tf }}
+          xcode-path: /Applications/Xcode_26.2.app
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  test-browser:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ToDo: find why not running.
+          # - id: blazor
+          #   workloads: wasm-tools
+          - id: avalonia-browser
+            workloads: wasm-tools
+          # ToDo: find why not running.
+          # - id: uno
+          #   tf: net10.0-browserwasm
+          #   workloads: wasm-tools android
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Run UI tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: browser
+          test-type: factos
+          test-id: ${{ matrix.id }}
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          workloads: ${{ matrix.workloads }}
+          target-framework: ${{ matrix.tf }}
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  test-android:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: avalonia-android
+            workloads: android
+          - id: maui
+            tf: net10.0-android
+            workloads: maui-android
+          # ToDo: find why not running.
+          # - id: uno
+          #   tf: net10.0-android
+          #   workloads: android
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Run UI tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: android
+          test-type: factos-android
+          test-id: ${{ matrix.id }}
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          workloads: ${{ matrix.workloads }}
+          target-framework: ${{ matrix.tf }}
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  test-ios:
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: avalonia-ios
+            workloads: ios
+          - id: maui-ios
+            tf: net10.0-ios
+            workloads: maui
+          # disabled for now, in this uno version, it takes 3 times longer than the others (about 40 mins)
+          # - id: uno
+          #   tf: net10.0-ios
+          #   workloads: ios android
+    needs: [pack, report-progress-starting, collect-packages, prepare]
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Run UI tests
+        uses: ./.github/actions/run-tests
+        with:
+          id: ios
+          test-type: factos-ios
+          test-id: ${{ matrix.id }}
+          livecharts-suffix: ${{ needs.prepare.outputs.suffix }}
+          workloads: ${{ matrix.workloads }}
+          target-framework: ${{ matrix.tf }}
+          xcode-path: /Applications/Xcode_26.2.app
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+
+  after-tests:
+    runs-on: ubuntu-24.04
+    if: always()
+    needs:
+      - report-progress-starting
+      - test-core
+      - test-snapshot
+      - test-windows
+      - test-linux
+      - test-mac
+      - test-browser
+      - test-android
+      - test-ios
+      - prepare
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v6.0.1
+
+      - name: Download all test results
+        uses: actions/download-artifact@v7.0.0
+        with:
+          path: ./artifacts
+
+      - name: Publish all test results
+        id: report
+        uses: dorny/test-reporter@v2.4.0
+        with:
+          name: all-test-results
+          path: "./artifacts/**/*.trx"
+          reporter: dotnet-trx
+
+      - name: Report tests completion
+        if: ${{ always() && !contains(join(needs.*.result, ' '), 'failure') && !contains(join(needs.*.result, ' '), 'cancelled') && !contains(join(needs.*.result, ' '), 'skipped') }}
+        uses: ./.github/actions/comment-progress
+        with:
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+          content: |
+            Core #${{ needs.test-core.result }} | Snapshot #${{ needs.test-snapshot.result }} | Windows #${{ needs.test-windows.result }} | Linux #${{ needs.test-linux.result }} | Mac #${{ needs.test-mac.result }} | Browser #${{ needs.test-browser.result }} | Android #${{ needs.test-android.result }} | iOS #${{ needs.test-ios.result }}
+
+            #### Test Results Summary (Passed) ✅
+
+      - name: Report tests failure
+        if: ${{ always() && (contains(join(needs.*.result, ' '), 'failure') || contains(join(needs.*.result, ' '), 'cancelled') || contains(join(needs.*.result, ' '), 'skipped')) }}
+        uses: ./.github/actions/comment-progress
+        with:
+          comment_id: ${{ needs.report-progress-starting.outputs.comment_id }}
+          content: |
+          
+            Core #${{ needs.test-core.result }} | Snapshot #${{ needs.test-snapshot.result }} | Windows #${{ needs.test-windows.result }} | Linux #${{ needs.test-linux.result }} | Mac #${{ needs.test-mac.result }} | Browser #${{ needs.test-browser.result }} | Android #${{ needs.test-android.result }} | iOS #${{ needs.test-ios.result }}
+
+            #### Test Results Summary (Failure) ❌
+
+      - name: Setup .NET
+        if: ${{ github.ref_type == 'tag' && !contains(join(needs.*.result, ' '), 'failure') && !contains(join(needs.*.result, ' '), 'cancelled') && !contains(join(needs.*.result, ' '), 'skipped') }}
+        uses: ./.github/actions/setup-dotnet-and-workloads
+
+      - name: Publish to NuGet
+        shell: bash
+        if: ${{ github.ref_type == 'tag' && !contains(join(needs.*.result, ' '), 'failure') && !contains(join(needs.*.result, ' '), 'cancelled') && !contains(join(needs.*.result, ' '), 'skipped') }}
+        run:
+          dotnet nuget push **/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

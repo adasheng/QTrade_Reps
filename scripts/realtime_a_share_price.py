@@ -90,6 +90,33 @@ DEFAULT_HEADERS = {
 }
 
 
+def new_session(proxy: str | None = None) -> requests.Session:
+    """默认直连,忽略 HTTP_PROXY / 系统代理。东方财富接口在国内本来就能访问,
+    走已关闭的本机代理(如 127.0.0.1:8100)会直接 Connection refused。"""
+    session = requests.Session()
+    session.trust_env = False
+    session.headers.update(DEFAULT_HEADERS)
+    if proxy:
+        session.proxies.update({"http": proxy, "https": proxy})
+    else:
+        session.proxies.update({"http": None, "https": None})
+    return session
+
+
+def format_network_error(exc: BaseException) -> str:
+    text = str(exc)
+    lowered = text.lower()
+    if "127.0.0.1" in text or "localhost" in lowered:
+        return (
+            f"{text}\n"
+            "原因: 请求被转到了本机代理,但代理程序没有在监听"
+            "(常见于 Clash / V2Ray 设置了 HTTP_PROXY=127.0.0.1:xxxx)。\n"
+            "本工具默认直连东方财富。请更新脚本后重试;若仍要走代理,加 "
+            "--proxy http://127.0.0.1:端口"
+        )
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Symbol parsing
 # ---------------------------------------------------------------------------
@@ -300,11 +327,7 @@ def search_stocks(
         "token": EM_SEARCH_TOKEN,
         "count": str(count),
     }
-    r = session.get(
-        EM_SEARCH_URL, params=params, headers=DEFAULT_HEADERS, timeout=DEFAULT_TIMEOUT
-    )
-    r.raise_for_status()
-    payload = r.json()
+    payload = _request_json(session, EM_SEARCH_URL, params, retries=2)
     rows = (payload.get("QuotationCodeTable") or {}).get("Data") or []
     hits: list[SearchHit] = []
     for row in rows:
@@ -360,12 +383,12 @@ def resolve_target(target: str, last_hits: list[SearchHit]) -> Symbol:
     return parse_symbol(target)
 
 
-def run_search(keyword: str) -> int:
-    session = requests.Session()
+def run_search(keyword: str, proxy: str | None = None) -> int:
+    session = new_session(proxy)
     try:
         hits = rank_hits(search_stocks(session, keyword))
-    except Exception as exc:
-        print(f"搜索失败: {exc}", file=sys.stderr)
+    except Exception as err:
+        print(f"搜索失败: {format_network_error(err)}", file=sys.stderr)
         return 1
     print_search_hits(hits)
     return 0 if hits else 1
@@ -393,8 +416,8 @@ def _prompt(text: str) -> str:
         raise GracefulExit()
 
 
-def interactive_loop(with_ma5: bool) -> int:
-    session = requests.Session()
+def interactive_loop(with_ma5: bool, proxy: str | None = None) -> int:
+    session = new_session(proxy)
     print("A 股代码查询 / 实时价")
     print("输入关键字搜索股票,例如: 思源")
     print("输入 h 查看帮助, q 退出。")
@@ -430,7 +453,7 @@ def interactive_loop(with_ma5: bool) -> int:
                 print(f"参数错误: {exc}")
                 continue
             try:
-                run(symbols=[sym], interval=3.0, once=True, with_ma5=with_ma5)
+                run(symbols=[sym], interval=3.0, once=True, with_ma5=with_ma5, proxy=proxy)
             except GracefulExit:
                 pass
             continue
@@ -459,6 +482,7 @@ def interactive_loop(with_ma5: bool) -> int:
                     interval=max(0.5, interval),
                     once=False,
                     with_ma5=with_ma5,
+                    proxy=proxy,
                 )
             except GracefulExit:
                 print()
@@ -468,7 +492,7 @@ def interactive_loop(with_ma5: bool) -> int:
         try:
             hits = rank_hits(search_stocks(session, keyword))
         except Exception as extra:
-            print(f"搜索失败: {extra}")
+            print(f"搜索失败: {format_network_error(extra)}")
             continue
         last_hits = hits
         print_search_hits(hits)
@@ -589,8 +613,9 @@ def run(
     interval: float,
     once: bool,
     with_ma5: bool,
+    proxy: str | None = None,
 ) -> int:
-    session = requests.Session()
+    session = new_session(proxy)
 
     closes_cache: dict[str, list[float]] = {}
     if with_ma5:
@@ -672,14 +697,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-ma5", action="store_true", help="不计算盘中 MA5,只看实时价"
     )
+    p.add_argument(
+        "--proxy",
+        default=None,
+        help="可选 HTTP 代理,例如 http://127.0.0.1:8100;默认直连,忽略系统代理和环境变量",
+    )
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    proxy = args.proxy
 
     if args.search:
-        return run_search(args.search)
+        return run_search(args.search, proxy=proxy)
 
     if not args.symbols:
         if not sys.stdin.isatty():
@@ -689,14 +720,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         _install_signal_handlers()
-        return interactive_loop(with_ma5=not args.no_ma5)
+        return interactive_loop(with_ma5=not args.no_ma5, proxy=proxy)
 
     try:
         syms = [parse_symbol(s) for s in args.symbols]
-    except ValueError as extra:
+    except ValueError as err:
         if len(args.symbols) == 1:
-            return run_search(args.symbols[0])
-        print(f"参数错误: {extra}", file=sys.stderr)
+            return run_search(args.symbols[0], proxy=proxy)
+        print(f"参数错误: {err}", file=sys.stderr)
         return 2
 
     _install_signal_handlers()
@@ -707,6 +738,7 @@ def main(argv: list[str] | None = None) -> int:
             interval=max(0.5, args.interval),
             once=args.once,
             with_ma5=not args.no_ma5,
+            proxy=proxy,
         )
     except GracefulExit:
         print("\n[exit] 已停止。", file=sys.stderr)

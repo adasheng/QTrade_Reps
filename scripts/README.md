@@ -10,6 +10,7 @@ A 股盘中实时价格 + 准实时 5 日均价小工具。
 
 - `https://push2.eastmoney.com/api/qt/stock/get` —— 单票实时盘口快照
 - `https://push2his.eastmoney.com/api/qt/stock/kline/get` —— 日线 K 线
+- `https://searchapi.eastmoney.com/api/suggest/get` —— 按关键字搜股票代码
 
 脚本本身只依赖 `requests`,不需要安装 akshare/tushare/vnpy。
 
@@ -22,6 +23,13 @@ pip install requests
 ### 使用
 
 ```bash
+# 按关键字查股票代码(输出形如 深-思源电气-002028)
+python scripts/realtime_a_share_price.py --search 思源
+python scripts/realtime_a_share_price.py 思源
+
+# 不传参数:进入交互界面,可反复搜代码 / 看实时价
+python scripts/realtime_a_share_price.py
+
 # 每 3 秒刷新一次 贵州茅台
 python scripts/realtime_a_share_price.py 600519
 
@@ -34,6 +42,22 @@ python scripts/realtime_a_share_price.py sz000001 --once
 # 不算 MA5,纯看实时
 python scripts/realtime_a_share_price.py 600519 --no-ma5
 ```
+
+### 关键字搜代码
+
+数据源是东方财富公开联想接口 `https://searchapi.eastmoney.com/api/suggest/get`。
+支持中文名、拼音、代码片段。A 股结果排在前面,格式为 `市场-名称-代码`:
+
+```
+$ python scripts/realtime_a_share_price.py --search 思源
+共 5 条结果:
+ 1. 深-思源电气-002028  [深A]
+ 2. 三板-思源股份-870040  [三板]
+ ...
+```
+
+交互界面里直接输入 `思源` 同样会列出结果,再输入 `p 1` 即可查看第 1 条的实时价。
+
 
 ### 输出示例(交易时段)
 
